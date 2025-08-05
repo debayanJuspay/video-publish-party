@@ -47,6 +47,33 @@ export type Database = {
         }
         Relationships: []
       }
+      accounts: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          owner_id: string
+          updated_at: string
+          youtube_channel_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name: string
+          owner_id: string
+          updated_at?: string
+          youtube_channel_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          owner_id?: string
+          updated_at?: string
+          youtube_channel_id?: string | null
+        }
+        Relationships: []
+      }
       cart_items: {
         Row: {
           created_at: string
@@ -428,6 +455,100 @@ export type Database = {
           },
         ]
       }
+      user_roles: {
+        Row: {
+          account_id: string
+          created_at: string
+          id: string
+          role: Database["public"]["Enums"]["user_role"]
+          user_id: string
+        }
+        Insert: {
+          account_id: string
+          created_at?: string
+          id?: string
+          role: Database["public"]["Enums"]["user_role"]
+          user_id: string
+        }
+        Update: {
+          account_id?: string
+          created_at?: string
+          id?: string
+          role?: Database["public"]["Enums"]["user_role"]
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_roles_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      videos: {
+        Row: {
+          account_id: string
+          admin_notes: string | null
+          created_at: string
+          description: string | null
+          file_path: string
+          id: string
+          published_at: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          status: string | null
+          thumbnail_path: string | null
+          title: string
+          updated_at: string
+          uploaded_by: string | null
+          youtube_video_id: string | null
+        }
+        Insert: {
+          account_id: string
+          admin_notes?: string | null
+          created_at?: string
+          description?: string | null
+          file_path: string
+          id?: string
+          published_at?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          status?: string | null
+          thumbnail_path?: string | null
+          title: string
+          updated_at?: string
+          uploaded_by?: string | null
+          youtube_video_id?: string | null
+        }
+        Update: {
+          account_id?: string
+          admin_notes?: string | null
+          created_at?: string
+          description?: string | null
+          file_path?: string
+          id?: string
+          published_at?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          status?: string | null
+          thumbnail_path?: string | null
+          title?: string
+          updated_at?: string
+          uploaded_by?: string | null
+          youtube_video_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "videos_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       whatsapp_messages: {
         Row: {
           abandoned_cart_id: string | null
@@ -515,6 +636,14 @@ export type Database = {
           created_at: string
         }[]
       }
+      get_user_role: {
+        Args: { user_id: string; account_id: string }
+        Returns: Database["public"]["Enums"]["user_role"]
+      }
+      is_admin: {
+        Args: { user_id: string }
+        Returns: boolean
+      }
       record_whatsapp_message: {
         Args: {
           cart_id: string
@@ -530,7 +659,7 @@ export type Database = {
       }
     }
     Enums: {
-      [_ in never]: never
+      user_role: "account_owner" | "editor" | "admin"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -657,6 +786,8 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      user_role: ["account_owner", "editor", "admin"],
+    },
   },
 } as const
