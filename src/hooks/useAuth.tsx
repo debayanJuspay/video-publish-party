@@ -1,80 +1,128 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { User, Session } from '@supabase/supabase-js';
-import { supabase } from '@/integrations/supabase/client';
+import api from '@/lib/api';
+
+interface User {
+  id: string;
+  email: string;
+  name: string;
+  picture?: string;
+  role: string;
+}
 
 interface AuthContextType {
   user: User | null;
-  session: Session | null;
   loading: boolean;
-  signUp: (email: string, password: string, fullName: string) => Promise<{ error: any }>;
-  signIn: (email: string, password: string) => Promise<{ error: any }>;
+  signInWithGoogle: (code: string) => Promise<{ error: any }>;
   signOut: () => Promise<{ error: any }>;
+  token: string | null;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+// Configure axios defaults
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+axios.defaults.baseURL = API_URL;
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
-  const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
+  const [token, setToken] = useState<string | null>(null);
 
   useEffect(() => {
-    // Set up auth state listener FIRST
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, session) => {
-        setSession(session);
-        setUser(session?.user ?? null);
-        setLoading(false);
-      }
-    );
-
-    // THEN check for existing session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
+    // Check for existing token in localStorage
+    const storedToken = localStorage.getItem('auth_token');
+    console.log('Checking stored token:', storedToken ? 'Found' : 'Not found');
+    
+    if (storedToken) {
+      setToken(storedToken);
+      // Set axios authorization header
+      axios.defaults.headers.common['Authorization'] = `Bearer ${storedToken}`;
+      fetchUserProfile(storedToken);
+    } else {
+      console.log('No stored token, setting loading to false');
       setLoading(false);
-    });
-
-    return () => subscription.unsubscribe();
+    }
   }, []);
 
-  const signUp = async (email: string, password: string, fullName: string) => {
-    const redirectUrl = `${window.location.origin}/`;
-    
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        emailRedirectTo: redirectUrl,
-        data: {
-          full_name: fullName,
+  const fetchUserProfile = async (authToken: string) => {
+    try {
+      console.log('⏱️ Starting profile fetch...');
+      const startTime = Date.now();
+      
+      const response = await axios.get('/auth/profile', {
+        headers: {
+          Authorization: `Bearer ${authToken}`
         }
-      }
-    });
-    return { error };
+      });
+      
+      const endTime = Date.now();
+      console.log(`✅ Profile fetched in ${endTime - startTime}ms:`, response.data);
+      setUser(response.data);
+    } catch (error: any) {
+      console.error('Failed to fetch user profile:', error.response?.data || error.message);
+      // Clear invalid token
+      localStorage.removeItem('auth_token');
+      setToken(null);
+      setUser(null);
+      delete axios.defaults.headers.common['Authorization'];
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password
-    });
-    return { error };
+  const signInWithGoogle = async (code: string) => {
+    try {
+      setLoading(true);
+      const response = await axios.post('/auth/google', { code });
+      
+      const { token: authToken, user: userData } = response.data;
+      
+      // Store token and user data
+      localStorage.setItem('auth_token', authToken);
+      setToken(authToken);
+      setUser(userData);
+      
+      // Set axios authorization header
+      axios.defaults.headers.common['Authorization'] = `Bearer ${authToken}`;
+      
+      return { error: null };
+    } catch (error: any) {
+      console.error('Google sign in error:', error);
+      return { 
+        error: error.response?.data?.error || 'Authentication failed' 
+      };
+    } finally {
+      setLoading(false);
+    }
   };
 
   const signOut = async () => {
-    const { error } = await supabase.auth.signOut();
-    return { error };
+    try {
+      console.log('🚪 Starting logout process...');
+      
+      // Clear stored data
+      localStorage.removeItem('auth_token');
+      setToken(null);
+      setUser(null);
+      
+      // Clear axios authorization header
+      delete axios.defaults.headers.common['Authorization'];
+      
+      console.log('✅ Logout completed successfully');
+      return { error: null };
+    } catch (error) {
+      console.error('Sign out error:', error);
+      return { error: 'Sign out failed' };
+    }
   };
 
   return (
     <AuthContext.Provider value={{
       user,
-      session,
       loading,
-      signUp,
-      signIn,
-      signOut
+      signInWithGoogle,
+      signOut,
+      token
     }}>
       {children}
     </AuthContext.Provider>
