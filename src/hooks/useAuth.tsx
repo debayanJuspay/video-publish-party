@@ -19,10 +19,6 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Configure axios defaults
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
-axios.defaults.baseURL = API_URL;
-
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -35,8 +31,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     
     if (storedToken) {
       setToken(storedToken);
-      // Set axios authorization header
-      axios.defaults.headers.common['Authorization'] = `Bearer ${storedToken}`;
       fetchUserProfile(storedToken);
     } else {
       console.log('No stored token, setting loading to false');
@@ -49,7 +43,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       console.log('⏱️ Starting profile fetch...');
       const startTime = Date.now();
       
-      const response = await axios.get('/auth/profile', {
+      const response = await api.get('/auth/profile', {
         headers: {
           Authorization: `Bearer ${authToken}`
         }
@@ -64,7 +58,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       localStorage.removeItem('auth_token');
       setToken(null);
       setUser(null);
-      delete axios.defaults.headers.common['Authorization'];
     } finally {
       setLoading(false);
     }
@@ -73,7 +66,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signInWithGoogle = async (code: string) => {
     try {
       setLoading(true);
-      const response = await axios.post('/auth/google', { code });
+      const response = await api.post('/auth/google', { code });
       
       const { token: authToken, user: userData } = response.data;
       
