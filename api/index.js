@@ -17,7 +17,7 @@ const app = express();
 // Middleware
 app.use(cors({
   origin: process.env.NODE_ENV === 'production' 
-    ? [process.env.FRONTEND_URL || 'https://videohub-brown-alpha.vercel.app'] 
+    ? [process.env.FRONTEND_URL, 'https://videohub-brown-alpha.vercel.app'] 
     : ['http://localhost:5173', 'http://localhost:3000', 'http://localhost:8080'],
   credentials: true
 }));
@@ -62,8 +62,17 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-// Google OAuth2 client
+// Google OAuth2 client for general auth
 const oauth2Client = new OAuth2Client(
+  process.env.GOOGLE_CLIENT_ID,
+  process.env.GOOGLE_CLIENT_SECRET,
+  process.env.NODE_ENV === 'production' 
+    ? 'https://videohub-brown-alpha.vercel.app'
+    : 'http://localhost:8080'
+);
+
+// Separate OAuth2 client for YouTube API operations
+const youtubeOauth2Client = new OAuth2Client(
   process.env.GOOGLE_CLIENT_ID,
   process.env.GOOGLE_CLIENT_SECRET,
   process.env.NODE_ENV === 'production' 
@@ -140,8 +149,154 @@ app.get('/api/health', async (req, res) => {
   }
 });
 
-// Google OAuth login
+// Google OAuth login with authorization code
 app.post('/api/auth/google', async (req, res) => {
+  console.log('🔐 OAuth request received:', { hasCode: !!req.body.code });
+  
+  try {
+    const { code } = req.body;
+    
+    if (!code) {
+      console.log('❌ No authorization code provided');
+      return res.status(400).json({ error: 'Authorization code is required' });
+    }
+
+    console.log('🔄 Exchanging authorization code for tokens...');
+    const startTime = Date.now();
+    
+    // Exchange authorization code for tokens
+    const { tokens } = await oauth2Client.getToken(code);
+    console.log(`✅ Token exchange completed in ${Date.now() - startTime}ms`);
+    
+    oauth2Client.setCredentials(tokens);
+
+    console.log('🔍 Verifying ID token...');
+    // Verify the ID token
+    const ticket = await oauth2Client.verifyIdToken({
+      idToken: tokens.id_token,
+      audience: process.env.GOOGLE_CLIENT_ID
+    });
+    console.log('✅ ID token verified successfully');
+    
+    const payload = ticket.getPayload();
+    const { sub: googleId, email, name, picture } = payload;
+    
+    console.log('Google OAuth user data:', { googleId, email, name, role: 'admin' });
+    
+    const db = await connectToMongoDB();
+    let user = await db.collection('users').findOne({ googleId });
+    
+    console.log('Found existing user by googleId:', user ? { id: user._id, email: user.email, role: user.role } : 'none');
+    
+    if (!user) {
+      user = await db.collection('users').findOne({ email });
+      console.log('Found existing user by email:', user ? { id: user._id, email: user.email, role: user.role } : 'none');
+      if (user) {
+        await db.collection('users').updateOne(
+          { _id: user._id },
+          { $set: { googleId, picture, role: 'admin' } }  // Also update role to admin
+        );
+        user.googleId = googleId;
+        user.picture = picture;
+        user.role = 'admin';  // Update in memory object too
+        console.log('Updated existing user to admin role');
+      } else {
+        const newUser = {
+          googleId,
+          email,
+          name,
+          picture,
+          role: 'admin',
+          createdAt: new Date()
+        };
+        
+        const result = await db.collection('users').insertOne(newUser);
+        user = { ...newUser, _id: result.insertedId };
+        console.log('Created new user with admin role');
+      }
+    } else {
+      // User exists with googleId, ensure they have admin role
+      if (user.role !== 'admin') {
+        await db.collection('users').updateOne(
+          { _id: user._id },
+          { $set: { role: 'admin' } }
+        );
+        user.role = 'admin';
+        console.log('Updated existing Google user to admin role');
+      } else {
+        console.log('User already has admin role');
+      }
+    }
+    
+    // CRITICAL: Create super admin userRole entry for OAuth admins
+    if (user.role === 'admin') {
+      console.log('🔧 Creating/ensuring owner userRole entry for admin:', user.email);
+      
+      // Check if admin already has an owner role entry
+      const existingOwnerRole = await db.collection('userRoles').findOne({
+        userId: user.googleId,
+        role: 'owner',
+        isGlobalAdmin: true
+      });
+      
+      if (!existingOwnerRole) {
+        // Create a special owner role entry (not tied to any specific account)
+        await db.collection('userRoles').insertOne({
+          userId: user.googleId,
+          accountId: null, // null means "global admin" - access to all accounts
+          role: 'owner',
+          createdAt: new Date(),
+          isGlobalAdmin: true
+        });
+        console.log('✅ Created global owner userRole entry');
+      } else {
+        console.log('✅ Global owner userRole entry already exists');
+      }
+    }
+    
+    const token = jwt.sign(
+      { 
+        userId: user.googleId,
+        userType: 'google',
+        email: user.email,
+        name: user.name,
+        role: user.role 
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+    
+    res.json({ 
+      user: { 
+        id: user.googleId, 
+        email: user.email, 
+        name: user.name, 
+        picture: user.picture, 
+        role: user.role 
+      }, 
+      token 
+    });
+  } catch (error) {
+    console.error('❌ Google auth error:', {
+      message: error.message,
+      stack: error.stack,
+      code: error.code,
+      details: error.details
+    });
+    
+    // Provide more specific error messages
+    if (error.message?.includes('invalid_grant')) {
+      return res.status(400).json({ error: 'Authorization code expired or invalid. Please try signing in again.' });
+    } else if (error.message?.includes('redirect_uri_mismatch')) {
+      return res.status(400).json({ error: 'OAuth configuration error. Please contact support.' });
+    }
+    
+    res.status(400).json({ error: 'Authentication failed. Please try again.' });
+  }
+});
+
+// Google OAuth login with ID token (legacy endpoint)
+app.post('/api/auth/google/token', async (req, res) => {
   try {
     const { credential } = req.body;
     
@@ -161,10 +316,11 @@ app.post('/api/auth/google', async (req, res) => {
       if (user) {
         await db.collection('users').updateOne(
           { _id: user._id },
-          { $set: { googleId, picture } }
+          { $set: { googleId, picture, role: 'admin' } }  // Also update role to admin
         );
         user.googleId = googleId;
         user.picture = picture;
+        user.role = 'admin';  // Update in memory object too
       } else {
         const newUser = {
           googleId,
@@ -177,6 +333,41 @@ app.post('/api/auth/google', async (req, res) => {
         
         const result = await db.collection('users').insertOne(newUser);
         user = { ...newUser, _id: result.insertedId };
+      }
+    } else {
+      // User exists with googleId, ensure they have admin role
+      if (user.role !== 'admin') {
+        await db.collection('users').updateOne(
+          { _id: user._id },
+          { $set: { role: 'admin' } }
+        );
+        user.role = 'admin';
+      }
+    }
+    
+    // CRITICAL: Create super admin userRole entry for OAuth admins (legacy endpoint)
+    if (user.role === 'admin') {
+      console.log('🔧 [Legacy] Creating/ensuring owner userRole entry for admin:', user.email);
+      
+      // Check if admin already has an owner role entry
+      const existingOwnerRole = await db.collection('userRoles').findOne({
+        userId: user.googleId,
+        role: 'owner',
+        isGlobalAdmin: true
+      });
+      
+      if (!existingOwnerRole) {
+        // Create a special owner role entry (not tied to any specific account)
+        await db.collection('userRoles').insertOne({
+          userId: user.googleId,
+          accountId: null, // null means "global admin" - access to all accounts
+          role: 'owner',
+          createdAt: new Date(),
+          isGlobalAdmin: true
+        });
+        console.log('✅ [Legacy] Created global owner userRole entry');
+      } else {
+        console.log('✅ [Legacy] Global owner userRole entry already exists');
       }
     }
     
@@ -300,13 +491,17 @@ app.post('/api/accounts', authenticateToken, async (req, res) => {
 
     const result = await db.collection('accounts').insertOne(account);
     
-    // Add owner role
+    console.log('🎯 Creating account for user:', req.user.userId, 'role:', req.user.role);
+    
+    // Add owner role - always use 'owner' for account creators regardless of user role
     await db.collection('userRoles').insertOne({
       userId: req.user.userId,
       accountId: result.insertedId,
-      role: 'owner',
+      role: 'owner',  // Always owner for account creator
       createdAt: new Date()
     });
+
+    console.log('✅ Account created with owner role assigned');
 
     res.json({ 
       id: result.insertedId,
@@ -320,48 +515,148 @@ app.post('/api/accounts', authenticateToken, async (req, res) => {
 
 // Get user accounts
 app.get('/api/accounts', authenticateToken, async (req, res) => {
+  // Set no-cache headers to prevent 304 responses
+  res.set({
+    'Cache-Control': 'no-cache, no-store, must-revalidate',
+    'Pragma': 'no-cache',
+    'Expires': '0'
+  });
+  
   try {
     const db = await connectToMongoDB();
     
-    // Get user roles
-    const userRoles = await db.collection('userRoles').find({
-      userId: req.user.userId
-    }).toArray();
+    // Get user roles - make sure to check if userId exists and is valid
+    const userId = req.user.userId;
+    if (!userId) {
+      console.log('No userId found in request');
+      return res.json([]);
+    }
 
-    if (userRoles.length === 0) {
+    console.log('🔍 Account request - User ID:', userId, 'User Type:', req.user.userType, 'Role:', req.user.role);
+    
+    let accounts = [];
+    let userRoles = [];
+    
+    try {
+      // For admin users, check if they have global admin privileges
+      if (req.user.role === 'admin') {
+        console.log('👑 Admin user - checking for global admin privileges');
+        
+        // Check if user has global admin role
+        const globalAdminRole = await db.collection('userRoles').findOne({
+          userId: userId,
+          role: 'owner',
+          $or: [
+            { isGlobalAdmin: true },
+            { accountId: null }
+          ]
+        });
+        
+        if (globalAdminRole) {
+          console.log('🌟 Global admin detected - returning ALL accounts');
+          
+          // Global admin can see ALL accounts in the system
+          const allAccounts = await db.collection('accounts').find({}).toArray();
+          
+          const accountsWithRoles = allAccounts.map(account => ({
+            ...account,
+            userRole: 'owner' // Mark as owner for all accounts
+          }));
+          
+          console.log('✅ Returning', accountsWithRoles.length, 'accounts to global admin');
+          return res.json(accountsWithRoles || []);
+        }
+        
+        // If admin but not super admin, get accounts they own directly
+        console.log('👑 Regular admin - checking owned accounts');
+        
+        const ownedAccounts = await db.collection('accounts').find({
+          ownerId: userId
+        }).toArray();
+        
+        console.log('📋 Admin owned accounts:', ownedAccounts.length);
+        
+        // For each owned account, ensure there's a corresponding userRole entry
+        for (const account of ownedAccounts) {
+          const existingRole = await db.collection('userRoles').findOne({
+            userId: userId,
+            accountId: account._id
+          });
+          
+          if (!existingRole) {
+            console.log('🔧 Creating missing owner role for account:', account.name);
+            // Create missing owner role
+            await db.collection('userRoles').insertOne({
+              userId: userId,
+              accountId: account._id,
+              role: 'owner',
+              createdAt: new Date()
+            });
+          }
+        }
+        
+        // Now get all user roles for this admin
+        userRoles = await db.collection('userRoles').find({
+          userId: userId
+        }).toArray();
+        
+      } else {
+        // For non-admin users, get roles normally
+        if (req.user.userType === 'email') {
+          userRoles = await db.collection('userRoles').find({
+            $or: [
+              { userId: new ObjectId(userId) },  // ObjectId format
+              { userId: userId }                  // String format
+            ]
+          }).toArray();
+        } else {
+          // For Google users, userId is the googleId (string)
+          userRoles = await db.collection('userRoles').find({
+            userId: userId
+          }).toArray();
+        }
+      }
+    } catch (error) {
+      console.error('Error finding user roles:', error);
+      return res.json([]);
+    }
+
+    console.log('📋 User roles found:', userRoles.length);
+
+    if (!userRoles || userRoles.length === 0) {
+      console.log('❌ No roles found for user, returning empty accounts');
       return res.json([]);
     }
 
     const accountIds = userRoles.map(ur => ur.accountId);
-    let accounts = await db.collection('accounts').find({
+    accounts = await db.collection('accounts').find({
       _id: { $in: accountIds }
     }).toArray();
 
-    // Filter accounts based on user role
-    if (req.user.role === 'admin') {
-      accounts = accounts.filter(account => {
-        const userRole = userRoles.find(ur => ur.accountId.equals(account._id));
-        return userRole && userRole.role === 'owner';
-      });
-    } else {
-      accounts = accounts.filter(account => {
-        const userRole = userRoles.find(ur => ur.accountId.equals(account._id));
-        return userRole && userRole.role === 'editor';
-      });
-    }
-
+    // Return all accounts where user has any role (owner or editor)
     const accountsWithRoles = accounts.map(account => {
       const userRole = userRoles.find(ur => ur.accountId.equals(account._id));
       return {
         ...account,
-        userRole: userRole.role
+        userRole: userRole ? userRole.role : 'editor'
       };
     });
 
-    res.json(accountsWithRoles);
+    console.log('✅ Final response for accounts endpoint:', {
+      userId: userId,
+      userRole: req.user.role,
+      accountsCount: accountsWithRoles.length,
+      accountsData: accountsWithRoles.map(acc => ({
+        id: acc._id,
+        name: acc.name,
+        userRole: acc.userRole
+      }))
+    });
+    
+    res.json(accountsWithRoles || []);
   } catch (error) {
     console.error('Get accounts error:', error);
-    res.status(500).json({ error: 'Failed to get accounts' });
+    res.status(500).json({ error: 'Failed to get accounts', accounts: [] });
   }
 });
 
@@ -692,3 +987,471 @@ export default app;
 
 // Initialize MongoDB connection
 connectToMongoDB().catch(console.error);
+
+// Get editors for a specific account
+app.get('/api/accounts/:accountId/editors', authenticateToken, async (req, res) => {
+  try {
+    const { accountId } = req.params;
+    const db = await connectToMongoDB();
+    
+    // Verify user has access to this account
+    const accountObjectId = new ObjectId(accountId);
+    const userRole = await db.collection('userRoles').findOne({
+      $or: [
+        { userId: req.user.userType === 'email' ? new ObjectId(req.user.userId) : req.user.userId },
+        { userId: req.user.userId }
+      ],
+      accountId: accountObjectId
+    });
+    
+    if (!userRole || userRole.role !== 'owner') {
+      return res.status(403).json({ error: 'Access denied. Only account owners can view editors.' });
+    }
+    
+    // Get all editors for this account
+    const editorRoles = await db.collection('userRoles').find({
+      accountId: accountObjectId,
+      role: 'editor'
+    }).toArray();
+    
+    if (editorRoles.length === 0) {
+      return res.json([]);
+    }
+    
+    // Get editor user details
+    const editorUserIds = editorRoles.map(ur => ur.userId);
+    const editors = await db.collection('users').find({
+      $or: [
+        { _id: { $in: editorUserIds.filter(id => ObjectId.isValid(id)).map(id => new ObjectId(id)) } },
+        { googleId: { $in: editorUserIds.filter(id => !ObjectId.isValid(id)) } }
+      ]
+    }).toArray();
+    
+    const editorsWithRoles = editors.map(editor => ({
+      id: editor._id?.toString() || editor.googleId,
+      name: editor.name,
+      email: editor.email,
+      role: 'editor',
+      addedAt: editorRoles.find(ur => 
+        (ur.userId === editor._id?.toString() || ur.userId === editor.googleId)
+      )?.createdAt
+    }));
+    
+    res.json(editorsWithRoles);
+  } catch (error) {
+    console.error('Get account editors error:', error);
+    res.status(500).json({ error: 'Failed to get account editors' });
+  }
+});
+
+// Add editor to account
+app.post('/api/accounts/:accountId/editors', authenticateToken, async (req, res) => {
+  try {
+    const { accountId } = req.params;
+    const { email } = req.body;
+    
+    if (!email) {
+      return res.status(400).json({ error: 'Email is required' });
+    }
+    
+    const db = await connectToMongoDB();
+    
+    // Verify user has access to this account
+    const accountObjectId = new ObjectId(accountId);
+    const userRole = await db.collection('userRoles').findOne({
+      $or: [
+        { userId: req.user.userType === 'email' ? new ObjectId(req.user.userId) : req.user.userId },
+        { userId: req.user.userId }
+      ],
+      accountId: accountObjectId
+    });
+    
+    if (!userRole || userRole.role !== 'owner') {
+      return res.status(403).json({ error: 'Access denied. Only account owners can add editors.' });
+    }
+    
+    // Find the user to add as editor
+    const userToAdd = await db.collection('users').findOne({ email: email.toLowerCase() });
+    if (!userToAdd) {
+      return res.status(404).json({ error: 'User not found with this email' });
+    }
+    
+    const editorUserId = userToAdd._id || userToAdd.googleId;
+    
+    // Check if user is already an editor of this account
+    const existingRole = await db.collection('userRoles').findOne({
+      userId: editorUserId,
+      accountId: accountObjectId
+    });
+    
+    if (existingRole) {
+      return res.status(400).json({ error: 'User is already assigned to this account' });
+    }
+    
+    // Add user as editor
+    const newRole = {
+      userId: editorUserId,
+      accountId: accountObjectId,
+      role: 'editor',
+      createdAt: new Date()
+    };
+    
+    await db.collection('userRoles').insertOne(newRole);
+    
+    res.json({
+      message: 'Editor added successfully',
+      editor: {
+        id: editorUserId,
+        name: userToAdd.name,
+        email: userToAdd.email,
+        role: 'editor'
+      }
+    });
+  } catch (error) {
+    console.error('Add editor error:', error);
+    res.status(500).json({ error: 'Failed to add editor' });
+  }
+});
+
+// Remove editor from account
+app.delete('/api/accounts/:accountId/editors/:editorId', authenticateToken, async (req, res) => {
+  try {
+    const { accountId, editorId } = req.params;
+    const db = await connectToMongoDB();
+    
+    // Verify user has access to this account
+    const accountObjectId = new ObjectId(accountId);
+    const userRole = await db.collection('userRoles').findOne({
+      $or: [
+        { userId: req.user.userType === 'email' ? new ObjectId(req.user.userId) : req.user.userId },
+        { userId: req.user.userId }
+      ],
+      accountId: accountObjectId
+    });
+    
+    if (!userRole || userRole.role !== 'owner') {
+      return res.status(403).json({ error: 'Access denied. Only account owners can remove editors.' });
+    }
+    
+    // Remove the editor role
+    const result = await db.collection('userRoles').deleteOne({
+      userId: editorId,
+      accountId: accountObjectId,
+      role: 'editor'
+    });
+    
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ error: 'Editor role not found' });
+    }
+    
+    res.json({ message: 'Editor removed successfully' });
+  } catch (error) {
+    console.error('Remove editor error:', error);
+    res.status(500).json({ error: 'Failed to remove editor' });
+  }
+});
+
+// YouTube authorization endpoints
+
+// Get YouTube authorization URL
+app.get('/api/youtube/auth-url/:accountId', authenticateToken, async (req, res) => {
+  try {
+    const { accountId } = req.params;
+    const db = await connectToMongoDB();
+    
+    console.log('YouTube auth request for account:', accountId, 'by user:', req.user.userId);
+    
+    // Verify user has access to this account
+    const accountObjectId = new ObjectId(accountId);
+    const userRole = await db.collection('userRoles').findOne({
+      $or: [
+        { userId: req.user.userType === 'email' ? new ObjectId(req.user.userId) : req.user.userId },
+        { userId: req.user.userId }
+      ],
+      accountId: accountObjectId
+    });
+    
+    console.log('User role found:', userRole);
+    
+    if (!userRole || userRole.role !== 'owner') {
+      console.log('Access denied for user:', req.user.userId, 'role:', userRole?.role);
+      return res.status(403).json({ error: 'Access denied. Only account owners can authorize YouTube.' });
+    }
+    
+    // Generate authorization URL with YouTube scope
+    const authUrl = youtubeOauth2Client.generateAuthUrl({
+      access_type: 'offline',
+      scope: [
+        'https://www.googleapis.com/auth/youtube.upload',
+        'https://www.googleapis.com/auth/youtube.force-ssl'
+      ],
+      state: accountId // Pass account ID in state parameter
+    });
+    
+    console.log('Generated YouTube auth URL for account:', accountId);
+    res.json({ authUrl });
+  } catch (error) {
+    console.error('YouTube auth URL error:', error);
+    res.status(500).json({ error: 'Failed to generate authorization URL' });
+  }
+});
+
+// YouTube OAuth callback
+app.get('/api/auth/youtube/callback', async (req, res) => {
+  try {
+    const { code, state: accountId } = req.query;
+    
+    console.log('YouTube callback received:', { code: !!code, accountId });
+    
+    if (!code) {
+      console.log('No authorization code provided');
+      return res.status(400).send('Authorization code not provided');
+    }
+    
+    if (!accountId) {
+      console.log('No account ID provided in state');
+      return res.status(400).send('Account ID not provided');
+    }
+    
+    console.log('Exchanging code for tokens...');
+    // Exchange authorization code for tokens
+    const { tokens } = await youtubeOauth2Client.getToken(code);
+    youtubeOauth2Client.setCredentials(tokens);
+    
+    console.log('Tokens received, getting channel info...');
+    // Get YouTube channel information
+    const youtube = google.youtube({ version: 'v3', auth: youtubeOauth2Client });
+    const channelResponse = await youtube.channels.list({
+      part: ['snippet'],
+      mine: true
+    });
+    
+    if (!channelResponse.data.items || channelResponse.data.items.length === 0) {
+      console.log('No YouTube channel found');
+      return res.status(400).send('No YouTube channel found for this account');
+    }
+    
+    const channel = channelResponse.data.items[0];
+    const channelId = channel.id;
+    const channelTitle = channel.snippet.title;
+    
+    console.log('Channel found:', { channelId, channelTitle });
+    
+    // Store YouTube credentials and channel info in database
+    const db = await connectToMongoDB();
+    const updateResult = await db.collection('accounts').updateOne(
+      { _id: new ObjectId(accountId) },
+      {
+        $set: {
+          youtubeChannelId: channelId,
+          youtubeChannelTitle: channelTitle,
+          youtubeAccessToken: tokens.access_token,
+          youtubeRefreshToken: tokens.refresh_token,
+          youtubeTokenExpiry: tokens.expiry_date,
+          youtubeAuthorizedAt: new Date(),
+          updatedAt: new Date()
+        }
+      }
+    );
+    
+    console.log('Database update result:', updateResult);
+    
+    // Send success message to parent window and close popup
+    res.send(`
+      <html>
+        <body>
+          <script>
+            console.log('Sending success message to parent window');
+            window.opener.postMessage({
+              type: 'YOUTUBE_AUTH_SUCCESS',
+              accountId: '${accountId}',
+              channelId: '${channelId}',
+              channelTitle: '${channelTitle}'
+            }, '*');
+            window.close();
+          </script>
+          <p>Authorization successful! You can close this window.</p>
+        </body>
+      </html>
+    `);
+  } catch (error) {
+    console.error('YouTube callback error:', error);
+    res.status(500).send(`
+      <html>
+        <body>
+          <script>
+            console.log('Sending error message to parent window');
+            window.opener.postMessage({
+              type: 'YOUTUBE_AUTH_ERROR',
+              error: 'Authorization failed: ${error.message}'
+            }, '*');
+            window.close();
+          </script>
+          <p>Authorization failed: ${error.message}</p>
+        </body>
+      </html>
+    `);
+  }
+});
+
+// Publish approved video to YouTube
+app.post('/api/videos/:videoId/publish', authenticateToken, async (req, res) => {
+  try {
+    const { videoId } = req.params;
+    const db = await connectToMongoDB();
+    
+    console.log('Publishing video to YouTube:', videoId);
+    
+    // Get the video details
+    const video = await db.collection('videos').findOne({ _id: new ObjectId(videoId) });
+    if (!video) {
+      return res.status(404).json({ error: 'Video not found' });
+    }
+    
+    if (video.status !== 'approved') {
+      return res.status(400).json({ error: 'Video must be approved before publishing' });
+    }
+    
+    // Get the account details with YouTube credentials
+    const account = await db.collection('accounts').findOne({ _id: new ObjectId(video.accountId) });
+    if (!account) {
+      return res.status(404).json({ error: 'Account not found' });
+    }
+    
+    if (!account.youtubeAccessToken || !account.youtubeChannelId) {
+      return res.status(400).json({ error: 'YouTube account not authorized. Please authorize YouTube first.' });
+    }
+    
+    console.log('Found account with YouTube credentials:', account.name);
+    
+    // Verify user has permission to publish
+    const userRole = await db.collection('userRoles').findOne({
+      $or: [
+        { userId: req.user.userType === 'email' ? new ObjectId(req.user.userId) : req.user.userId },
+        { userId: req.user.userId }
+      ],
+      accountId: new ObjectId(video.accountId)
+    });
+    
+    if (!userRole || userRole.role !== 'owner') {
+      return res.status(403).json({ error: 'Access denied. Only account owners can publish videos.' });
+    }
+    
+    // Set up YouTube OAuth client with stored tokens
+    const publishOauth2Client = new OAuth2Client(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET
+    );
+    
+    publishOauth2Client.setCredentials({
+      access_token: account.youtubeAccessToken,
+      refresh_token: account.youtubeRefreshToken,
+      expiry_date: account.youtubeTokenExpiry
+    });
+    
+    // Check if token needs refresh
+    if (account.youtubeTokenExpiry && new Date() > new Date(account.youtubeTokenExpiry)) {
+      console.log('Refreshing YouTube token...');
+      const { credentials } = await publishOauth2Client.refreshAccessToken();
+      publishOauth2Client.setCredentials(credentials);
+      
+      // Update stored tokens
+      await db.collection('accounts').updateOne(
+        { _id: new ObjectId(video.accountId) },
+        {
+          $set: {
+            youtubeAccessToken: credentials.access_token,
+            youtubeRefreshToken: credentials.refresh_token,
+            youtubeTokenExpiry: credentials.expiry_date,
+            updatedAt: new Date()
+          }
+        }
+      );
+    }
+    
+    const youtube = google.youtube({ version: 'v3', auth: publishOauth2Client });
+    
+    console.log('Downloading video from Cloudinary:', video.videoUrl);
+    
+    // Download video from Cloudinary
+    const videoResponse = await axios.get(video.videoUrl, {
+      responseType: 'stream'
+    });
+    
+    console.log('Uploading to YouTube...');
+    
+    // Upload to YouTube
+    const uploadResponse = await youtube.videos.insert({
+      part: ['snippet', 'status'],
+      requestBody: {
+        snippet: {
+          title: video.title,
+          description: video.description,
+          channelId: account.youtubeChannelId,
+          tags: ['video', 'upload', 'automated'],
+          categoryId: '22' // People & Blogs category
+        },
+        status: {
+          privacyStatus: 'public', // Can be 'private', 'unlisted', or 'public'
+          selfDeclaredMadeForKids: false
+        }
+      },
+      media: {
+        body: videoResponse.data
+      }
+    });
+    
+    const youtubeVideoId = uploadResponse.data.id;
+    const youtubeUrl = `https://www.youtube.com/watch?v=${youtubeVideoId}`;
+    
+    console.log('Video successfully uploaded to YouTube:', youtubeUrl);
+    
+    // Update video record with YouTube details
+    await db.collection('videos').updateOne(
+      { _id: new ObjectId(videoId) },
+      {
+        $set: {
+          status: 'published',
+          youtubeVideoId: youtubeVideoId,
+          youtubeUrl: youtubeUrl,
+          publishedAt: new Date(),
+          publishedBy: req.user.userId,
+          updatedAt: new Date()
+        }
+      }
+    );
+    
+    res.json({
+      message: 'Video successfully published to YouTube',
+      youtubeUrl: youtubeUrl,
+      youtubeVideoId: youtubeVideoId
+    });
+    
+  } catch (error) {
+    console.error('YouTube publish error:', error);
+    
+    // Update video status to failed
+    try {
+      const db = await connectToMongoDB();
+      await db.collection('videos').updateOne(
+        { _id: new ObjectId(req.params.videoId) },
+        {
+          $set: {
+            status: 'failed',
+            publishError: error.message,
+            updatedAt: new Date()
+          }
+        }
+      );
+    } catch (dbError) {
+      console.error('Failed to update video status:', dbError);
+    }
+    
+    res.status(500).json({ 
+      error: 'Failed to publish video to YouTube',
+      details: error.message 
+    });
+  }
+});
+
+// Videos endpoint...

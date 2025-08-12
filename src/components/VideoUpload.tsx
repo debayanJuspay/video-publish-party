@@ -9,7 +9,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/useAuth';
 import { UploadSkeleton } from '@/components/SkeletonLoaders';
 import { Upload, X, FileVideo, CheckCircle, Video } from 'lucide-react';
-import axios from 'axios';
+import api from '@/lib/api';
 
 interface VideoUploadProps {
   onUploadComplete: () => void;
@@ -36,10 +36,10 @@ export function VideoUpload({ onUploadComplete }: VideoUploadProps) {
 
   const fetchUserAccounts = async () => {
     try {
-      const response = await axios.get('/accounts');
+      const response = await api.get('/accounts');
       const userAccounts = response.data;
       
-      setAccounts(userAccounts || []);
+      setAccounts(Array.isArray(userAccounts) ? userAccounts : []);
       if (userAccounts && userAccounts.length > 0) {
         setSelectedAccount(userAccounts[0]._id);
       }
@@ -103,7 +103,7 @@ export function VideoUpload({ onUploadComplete }: VideoUploadProps) {
     formData.append('resourceType', resourceType);
     
     // Upload through our backend to avoid CORS issues
-    const response = await axios.post('/upload/cloudinary', formData, {
+    const response = await api.post('/upload/cloudinary', formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
@@ -161,7 +161,7 @@ export function VideoUpload({ onUploadComplete }: VideoUploadProps) {
         status: 'pending'
       };
 
-      await axios.post('/videos', videoData);
+      await api.post('/videos', videoData);
 
       toast({
         title: "Success",
@@ -193,6 +193,26 @@ export function VideoUpload({ onUploadComplete }: VideoUploadProps) {
 
   if (loading) {
     return <UploadSkeleton />;
+  }
+
+  // Show message if no accounts are available
+  if (accounts.length === 0) {
+    return (
+      <div className="max-w-4xl mx-auto">
+        <div className="text-center py-12">
+          <div className="w-20 h-20 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-blue-100 to-purple-100 dark:from-blue-900/20 dark:to-purple-900/20 flex items-center justify-center">
+            <Video className="h-10 w-10 text-blue-600 dark:text-blue-400" />
+          </div>
+          <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">No Accounts Available</h3>
+          <p className="text-gray-600 dark:text-gray-300 mb-4">
+            You need to create or be assigned to an account before you can upload videos.
+          </p>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
+            Go to the <strong>Accounts</strong> tab to create your first account or ask an admin to assign you to one.
+          </p>
+        </div>
+      </div>
+    );
   }
 
   return (

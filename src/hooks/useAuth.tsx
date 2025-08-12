@@ -14,6 +14,7 @@ interface AuthContextType {
   loading: boolean;
   signInWithGoogle: (code: string) => Promise<{ error: any }>;
   signOut: () => Promise<{ error: any }>;
+  refreshProfile: () => Promise<void>;
   token: string | null;
 }
 
@@ -31,6 +32,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     
     if (storedToken) {
       setToken(storedToken);
+      // Set api authorization header for existing token
+      api.defaults.headers.common['Authorization'] = `Bearer ${storedToken}`;
       fetchUserProfile(storedToken);
     } else {
       console.log('No stored token, setting loading to false');
@@ -65,27 +68,49 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signInWithGoogle = async (code: string) => {
     try {
+      console.log('🔄 Starting Google OAuth sign-in process...');
       setLoading(true);
-      const response = await api.post('/auth/google', { code });
       
-      const { token: authToken, user: userData } = response.data;
+      console.log('📡 Making API call to /auth/google...');
+      const startTime = Date.now();
       
-      // Store token and user data
+      const response = await api.post('/auth/google', { code }, {
+        timeout: 30000 // 30 second timeout
+      });
+      const tokenTime = Date.now();
+      console.log(`✅ OAuth API call completed in ${tokenTime - startTime}ms`);
+      
+      const { token: authToken } = response.data;
+      console.log('🎫 Received token, storing and setting headers...');
+      
+      // Store token
       localStorage.setItem('auth_token', authToken);
       setToken(authToken);
-      setUser(userData);
       
-      // Set axios authorization header
-      axios.defaults.headers.common['Authorization'] = `Bearer ${authToken}`;
+      // Set api authorization header
+      api.defaults.headers.common['Authorization'] = `Bearer ${authToken}`;
+      
+      console.log('👤 Fetching user profile...');
+      // Fetch the latest user profile to ensure we have the correct role
+      await fetchUserProfile(authToken);
+      
+      const totalTime = Date.now();
+      console.log(`🎉 Complete OAuth flow finished in ${totalTime - startTime}ms`);
       
       return { error: null };
     } catch (error: any) {
-      console.error('Google sign in error:', error);
+      console.error('❌ Google sign in error:', error);
       return { 
         error: error.response?.data?.error || 'Authentication failed' 
       };
     } finally {
       setLoading(false);
+    }
+  };
+
+  const refreshProfile = async () => {
+    if (token) {
+      await fetchUserProfile(token);
     }
   };
 
@@ -98,8 +123,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setToken(null);
       setUser(null);
       
-      // Clear axios authorization header
-      delete axios.defaults.headers.common['Authorization'];
+      // Clear api authorization header
+      delete api.defaults.headers.common['Authorization'];
       
       console.log('✅ Logout completed successfully');
       return { error: null };
@@ -115,6 +140,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       loading,
       signInWithGoogle,
       signOut,
+      refreshProfile,
       token
     }}>
       {children}

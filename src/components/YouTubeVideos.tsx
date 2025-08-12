@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/useAuth';
 import { ExternalLink, Eye, ThumbsUp, MessageCircle, Calendar, Video, Users } from 'lucide-react';
-import axios from 'axios';
+import api from '@/lib/api';
 
 interface YouTubeVideosProps {
   userRole: string | null;
@@ -34,7 +34,7 @@ export function YouTubeVideos({ userRole }: YouTubeVideosProps) {
 
   const fetchAccounts = async () => {
     try {
-      const response = await axios.get('/accounts/youtube-accessible');
+      const response = await api.get('/accounts/youtube-accessible');
       const userAccounts = response.data || [];
       
       setAccounts(userAccounts);
@@ -56,7 +56,7 @@ export function YouTubeVideos({ userRole }: YouTubeVideosProps) {
 
   const fetchChannelInfo = async (channelId: string) => {
     try {
-      const response = await axios.get(`/youtube/channel/${channelId}`);
+      const response = await api.get(`/youtube/channel/${channelId}`);
       setChannelInfo(response.data);
     } catch (error: any) {
       console.error('Error fetching channel info:', error);
@@ -67,7 +67,7 @@ export function YouTubeVideos({ userRole }: YouTubeVideosProps) {
   const fetchYouTubeVideos = async (channelId: string) => {
     setVideosLoading(true);
     try {
-      const response = await axios.get(`/youtube/videos/${channelId}?maxResults=20`);
+      const response = await api.get(`/youtube/videos/${channelId}?maxResults=20`);
       setVideos(response.data || []);
     } catch (error: any) {
       console.error('Error fetching YouTube videos:', error);

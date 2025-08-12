@@ -6,7 +6,7 @@ import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import { AdminSkeleton } from '@/components/SkeletonLoaders';
 import { UserPlus, Users, Mail, User, Trash2, Shield, Crown, Calendar } from 'lucide-react';
-import axios from 'axios';
+import api from '@/lib/api';
 
 export function AdminPanel() {
   const [users, setUsers] = useState<any[]>([]);
@@ -26,9 +26,10 @@ export function AdminPanel() {
   const fetchUsers = async () => {
     try {
       console.log('🔍 AdminPanel: Fetching users...');
-      const response = await axios.get('/admin/users');
+      const response = await api.get('/admin/users');
       console.log('🔍 AdminPanel: Server response:', response.data);
-      setUsers(response.data || []);
+      const usersData = response.data;
+      setUsers(Array.isArray(usersData) ? usersData : []);
     } catch (error: any) {
       console.error('Error fetching users:', error);
       toast({
@@ -46,7 +47,7 @@ export function AdminPanel() {
     setCreateLoading(true);
     
     try {
-      await axios.post('/admin/create-editor', newUser);
+      await api.post('/admin/create-editor', newUser);
       
       toast({
         title: "Success",
@@ -83,7 +84,7 @@ export function AdminPanel() {
     
     try {
       console.log('🗑️ Making DELETE request to:', `/admin/users/${userId}`);
-      const response = await axios.delete(`/admin/users/${userId}`);
+      const response = await api.delete(`/admin/users/${userId}`);
       console.log('🗑️ Delete response:', response.data);
       
       toast({

@@ -7,7 +7,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/useAuth';
 import { AccountSkeleton } from '@/components/SkeletonLoaders';
 import { Plus, Users, Trash2, Shield } from 'lucide-react';
-import axios from 'axios';
+import api from '@/lib/api';
 
 interface AccountManagementProps {
   userRole: string | null;
@@ -39,7 +39,7 @@ export function AccountManagement({ userRole }: AccountManagementProps) {
 
   const fetchAccounts = async () => {
     try {
-      const response = await axios.get('/accounts');
+      const response = await api.get('/accounts');
       const userAccounts = response.data || [];
       
       setAccounts(userAccounts);
@@ -60,7 +60,7 @@ export function AccountManagement({ userRole }: AccountManagementProps) {
 
   const fetchEditors = async (accountId: string) => {
     try {
-      const response = await axios.get(`/accounts/${accountId}/editors`);
+      const response = await api.get(`/accounts/${accountId}/editors`);
       setEditors(response.data || []);
     } catch (error: any) {
       console.error('Error fetching editors:', error);
@@ -85,7 +85,7 @@ export function AccountManagement({ userRole }: AccountManagementProps) {
     }
 
     try {
-      await axios.post('/accounts', {
+      await api.post('/accounts', {
         name: newAccountName.trim(),
         youtubeChannelId: newChannelId.trim() || null
       });
@@ -121,7 +121,7 @@ export function AccountManagement({ userRole }: AccountManagementProps) {
     }
 
     try {
-      await axios.post(`/accounts/${selectedAccountId}/editors`, {
+      await api.post(`/accounts/${selectedAccountId}/editors`, {
         email: newEditorEmail.trim()
       });
 
@@ -146,7 +146,7 @@ export function AccountManagement({ userRole }: AccountManagementProps) {
     if (!selectedAccountId) return;
 
     try {
-      await axios.delete(`/accounts/${selectedAccountId}/editors/${editorId}`);
+      await api.delete(`/accounts/${selectedAccountId}/editors/${editorId}`);
 
       toast({
         title: "Success",
@@ -166,7 +166,7 @@ export function AccountManagement({ userRole }: AccountManagementProps) {
 
   const authorizeYouTube = async (accountId: string) => {
     try {
-      const response = await axios.get(`/youtube/auth-url/${accountId}`);
+      const response = await api.get(`/youtube/auth-url/${accountId}`);
       const authUrl = response.data.authUrl;
       
       // Open Google OAuth in popup window
@@ -244,19 +244,29 @@ export function AccountManagement({ userRole }: AccountManagementProps) {
 
   return (
     <div className="space-y-8">
-      {/* Create New Account */}
+      {/* Create New Account - Enhanced for new users */}
       {(userRole === 'admin' || userRole === 'owner') && (
-        <div className="glass-card p-8 rounded-2xl">
+        <div className={`glass-card p-8 rounded-2xl ${accounts.length === 0 ? 'border-2 border-blue-500 bg-gradient-to-br from-blue-50/50 to-purple-50/50 dark:from-blue-900/10 dark:to-purple-900/10' : ''}`}>
           <div className="mb-6">
             <h3 className="text-2xl font-bold bg-gradient-to-r from-blue-600 via-purple-600 to-teal-600 bg-clip-text text-transparent flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 flex items-center justify-center">
                 <Plus className="h-5 w-5 text-white" />
               </div>
-              Create YouTube Account
+              {accounts.length === 0 ? 'Create Your First Account' : 'Create YouTube Account'}
             </h3>
             <p className="text-gray-600 dark:text-gray-300 mt-2">
-              Add a new YouTube account to manage videos and channels
+              {accounts.length === 0 
+                ? 'Welcome! Create your first account to start managing YouTube videos. You\'ll be automatically assigned as the owner.'
+                : 'Add a new YouTube account to manage videos and channels'
+              }
             </p>
+            {accounts.length === 0 && (
+              <div className="mt-4 p-4 rounded-lg bg-blue-100 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
+                <p className="text-sm text-blue-800 dark:text-blue-200">
+                  💡 <strong>Getting Started:</strong> Create an account first, then you can upload videos, manage team members, and publish to YouTube.
+                </p>
+              </div>
+            )}
           </div>
           
           <form onSubmit={createAccount} className="space-y-6">
@@ -320,7 +330,10 @@ export function AccountManagement({ userRole }: AccountManagementProps) {
               <Users className="h-10 w-10 text-blue-600 dark:text-blue-400" />
             </div>
             <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">No accounts found</h3>
-            <p className="text-gray-600 dark:text-gray-300">Create your first account to get started!</p>
+            <p className="text-gray-600 dark:text-gray-300 mb-4">Create your first account above to get started!</p>
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              Once you create an account, you'll be able to upload videos, manage team members, and publish to YouTube.
+            </p>
           </div>
         ) : (
           <div className="space-y-4">

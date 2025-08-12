@@ -12,7 +12,7 @@ import { AccountManagement } from '@/components/AccountManagement';
 import { AdminPanel } from '@/components/AdminPanel';
 import { DashboardSkeleton } from '@/components/SkeletonLoaders';
 import { Upload, Video, Users, Settings, LogOut, Sparkles, Crown, User } from 'lucide-react';
-import axios from 'axios';
+import api from '@/lib/api';
 
 export default function Dashboard() {
   const { user, signOut } = useAuth();
@@ -36,24 +36,42 @@ export default function Dashboard() {
 
   const fetchUserData = async () => {
     try {
-      // Get user's accounts and roles
-      const accountsResponse = await axios.get('/accounts');
+      // Get user's accounts and roles - add timestamp to prevent caching
+      const accountsResponse = await api.get(`/accounts?t=${Date.now()}`);
       const userAccounts = accountsResponse.data;
+      
+      console.log('📊 Raw API Response:', {
+        status: accountsResponse.status,
+        data: accountsResponse.data,
+        headers: accountsResponse.headers
+      });
       
       setAccounts(userAccounts || []);
       
+      console.log('🔍 Dashboard-new - Role determination:', {
+        userFromAuth: user,
+        userRole: user?.role,
+        userAccountsCount: userAccounts?.length || 0,
+        accountsWithOwnerRole: userAccounts?.filter((acc: any) => acc.userRole === 'owner').length || 0,
+        accountsWithEditorRole: userAccounts?.filter((acc: any) => acc.userRole === 'editor').length || 0
+      });
+      
       // Determine user role based on their highest role
-      if (user?.role === 'admin' && userAccounts?.some((acc: any) => acc.userRole === 'owner')) {
-        // Admin who owns at least one account
+      if (user?.role === 'admin') {
+        // Admin users always get admin role, regardless of account ownership
+        console.log('👑 Setting role to admin based on user.role');
         setUserRole('admin');
       } else if (userAccounts?.some((acc: any) => acc.userRole === 'owner')) {
         // User who owns at least one account (but not admin)
+        console.log('👨‍💼 Setting role to owner based on userRoles');
         setUserRole('owner');
       } else if (userAccounts?.some((acc: any) => acc.userRole === 'editor')) {
         // User who is an editor on at least one account
+        console.log('✏️ Setting role to editor based on userRoles');
         setUserRole('editor');
       } else {
         // Default role for users with no accounts
+        console.log('👤 Setting role to user (no accounts found)');
         setUserRole('user');
       }
     } catch (error: any) {
@@ -159,6 +177,18 @@ export default function Dashboard() {
               >
                 <LogOut className="h-4 w-4 mr-2" />
                 Sign Out
+              </Button>
+              
+              <Button 
+                onClick={() => {
+                  console.log('🔄 Force refreshing data...');
+                  fetchUserData();
+                }} 
+                variant="outline" 
+                size="sm"
+                className="border-blue-300 hover:bg-blue-50 hover:border-blue-400 transition-all duration-300 ml-2"
+              >
+                🔄 Refresh
               </Button>
             </div>
           </div>

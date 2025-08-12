@@ -778,6 +778,116 @@ app.get('/videos', authenticateToken, async (req, res) => {
   }
 });
 
+// Publish approved video to YouTube
+app.post('/api/videos/:videoId/publish', authenticateToken, async (req, res) => {
+  try {
+    const { videoId } = req.params;
+    
+    console.log('Publishing video to YouTube:', videoId);
+    
+    // Get the video details
+    const video = await db.collection('videos').findOne({ _id: new ObjectId(videoId) });
+    if (!video) {
+      return res.status(404).json({ error: 'Video not found' });
+    }
+    
+    if (video.status !== 'approved') {
+      return res.status(400).json({ error: 'Video must be approved before publishing' });
+    }
+    
+    // Get the account details with YouTube credentials
+    const account = await db.collection('accounts').findOne({ _id: new ObjectId(video.accountId) });
+    if (!account) {
+      return res.status(404).json({ error: 'Account not found' });
+    }
+    
+    if (!account.youtubeAccessToken || !account.youtubeRefreshToken) {
+      return res.status(400).json({ error: 'YouTube account not authorized. Please authorize YouTube first.' });
+    }
+    
+    console.log('Found account with YouTube credentials:', account.name);
+    
+    // Verify user has permission to publish
+    const userRole = await db.collection('userRoles').findOne({
+      $or: [
+        { userId: req.user.userType === 'email' ? new ObjectId(req.user.userId) : req.user.userId },
+        { userId: req.user.userId },
+        { userId: new ObjectId(req.user.userId) }
+      ],
+      $or: [
+        { accountId: new ObjectId(video.accountId) },
+        { accountId: null } // Global admin
+      ]
+    });
+    
+    if (!userRole || userRole.role !== 'owner') {
+      return res.status(403).json({ error: 'Access denied. Only account owners can publish videos.' });
+    }
+    
+    try {
+      // Prepare tokens for YouTube upload
+      const youtubeTokens = {
+        access_token: account.youtubeAccessToken,
+        refresh_token: account.youtubeRefreshToken
+      };
+      
+      // Upload to YouTube
+      const youtubeVideoId = await uploadVideoToYouTube(video, youtubeTokens);
+      const youtubeUrl = `https://www.youtube.com/watch?v=${youtubeVideoId}`;
+      
+      console.log('Video successfully uploaded to YouTube:', youtubeUrl);
+      
+      // Update video record with YouTube details
+      await db.collection('videos').updateOne(
+        { _id: new ObjectId(videoId) },
+        {
+          $set: {
+            status: 'published',
+            youtubeVideoId: youtubeVideoId,
+            youtubeUrl: youtubeUrl,
+            publishedAt: new Date(),
+            publishedBy: req.user.userId,
+            updatedAt: new Date()
+          }
+        }
+      );
+      
+      res.json({
+        message: 'Video successfully published to YouTube',
+        youtubeUrl: youtubeUrl,
+        youtubeVideoId: youtubeVideoId
+      });
+      
+    } catch (publishError) {
+      console.error('YouTube publish error:', publishError);
+      
+      // Update video status to failed
+      await db.collection('videos').updateOne(
+        { _id: new ObjectId(videoId) },
+        {
+          $set: {
+            status: 'publish_failed',
+            publishError: publishError.message,
+            updatedAt: new Date()
+          }
+        }
+      );
+      
+      res.status(500).json({ 
+        error: 'Failed to publish video to YouTube',
+        details: publishError.message 
+      });
+    }
+    
+  } catch (error) {
+    console.error('Publish endpoint error:', error);
+    res.status(500).json({ 
+      error: 'Failed to publish video to YouTube',
+      details: error.message 
+    });
+  }
+});
+
 // Approve/reject video
 app.patch('/videos/:videoId/status', authenticateToken, async (req, res) => {
   try {

@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
 import { Mail, User, Shield, ArrowLeft, Zap } from 'lucide-react';
-import axios from 'axios';
+import api from '@/lib/api';
 
 declare global {
   interface Window {
@@ -86,14 +86,14 @@ export default function Auth() {
     setEmailLoading(true);
     
     try {
-      const response = await axios.post('/auth/email', emailLogin);
+      const response = await api.post('/auth/email', emailLogin);
       
       // Store token and user data (using same key as useAuth hook)
       localStorage.setItem('auth_token', response.data.token);
       localStorage.setItem('user', JSON.stringify(response.data.user));
       
-      // Set axios authorization header
-      axios.defaults.headers.common['Authorization'] = `Bearer ${response.data.token}`;
+      // Set api authorization header
+      api.defaults.headers.common['Authorization'] = `Bearer ${response.data.token}`;
       
       toast({
         title: "Success",

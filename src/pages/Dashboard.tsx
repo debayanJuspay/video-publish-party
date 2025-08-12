@@ -12,7 +12,7 @@ import { AccountManagement } from '@/components/AccountManagement';
 import { AdminPanel } from '@/components/AdminPanel';
 import { YouTubeVideos } from '@/components/YouTubeVideos';
 import { Upload, Video, Users, Settings, LogOut, Youtube } from 'lucide-react';
-import axios from 'axios';
+import api from '@/lib/api';
 
 export default function Dashboard() {
   const { user, signOut } = useAuth();
@@ -33,22 +33,42 @@ export default function Dashboard() {
 
   const fetchUserData = async () => {
     try {
-      // Get user's accounts and roles
-      const accountsResponse = await axios.get('/accounts');
-      const userAccounts = accountsResponse.data;
+      // Get user's accounts and roles - add timestamp to prevent caching
+      const accountsResponse = await api.get(`/accounts?t=${Date.now()}`);
+      let userAccounts = accountsResponse.data;
       
-      setAccounts(userAccounts || []);
+      // Ensure userAccounts is always an array
+      if (!Array.isArray(userAccounts)) {
+        console.warn('API returned non-array data:', userAccounts);
+        userAccounts = [];
+      }
+      
+      setAccounts(userAccounts);
       
       // Determine user role based on accounts
+      console.log('🔍 Dashboard - Determining user role:', {
+        userFromAuth: user,
+        userRole: user?.role,
+        userAccounts: userAccounts.length,
+        accountsWithOwnerRole: userAccounts.filter((acc: any) => acc.userRole === 'owner').length
+      });
+      
       if (user?.role === 'admin') {
+        console.log('👑 Setting role to admin based on user.role');
         setUserRole('admin');
-      } else if (userAccounts?.some((acc: any) => acc.userRole === 'owner')) {
+      } else if (userAccounts.length > 0 && userAccounts.some((acc: any) => acc.userRole === 'owner')) {
+        console.log('👨‍💼 Setting role to owner based on userRoles');
         setUserRole('owner');
       } else {
+        console.log('📝 Setting role to editor (default)');
         setUserRole('editor');
       }
     } catch (error: any) {
       console.error('Error fetching user data:', error);
+      // Set empty array as fallback
+      setAccounts([]);
+      setUserRole('editor');
+      
       toast({
         title: "Error",
         description: "Failed to load user data",

@@ -8,7 +8,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/useAuth';
 import { VideoListSkeleton } from '@/components/SkeletonLoaders';
 import { Video, Calendar, User, ExternalLink, Check, X, Eye, Play, Clock, FileVideo, MessageSquare } from 'lucide-react';
-import axios from 'axios';
+import api from '@/lib/api';
 
 interface VideoListProps {
   userRole: string | null;
@@ -17,6 +17,7 @@ interface VideoListProps {
 export function VideoList({ userRole }: VideoListProps) {
   const [videos, setVideos] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [publishingVideoId, setPublishingVideoId] = useState<string | null>(null);
   const [previewVideo, setPreviewVideo] = useState<any>(null);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [adminNotes, setAdminNotes] = useState('');
@@ -34,12 +35,19 @@ export function VideoList({ userRole }: VideoListProps) {
     try {
       if (userRole === 'admin') {
         // Admin sees ALL videos from ALL accounts for review
-        const videosResponse = await axios.get('/videos');
-        setVideos(videosResponse.data || []);
+        const videosResponse = await api.get('/videos');
+        const videosData = videosResponse.data;
+        setVideos(Array.isArray(videosData) ? videosData : []);
       } else {
         // Regular users see only videos from accounts they have access to
-        const accountsResponse = await axios.get('/accounts');
-        const userAccounts = accountsResponse.data;
+        const accountsResponse = await api.get('/accounts');
+        let userAccounts = accountsResponse.data;
+        
+        // Ensure userAccounts is an array
+        if (!Array.isArray(userAccounts)) {
+          console.warn('Accounts API returned non-array:', userAccounts);
+          userAccounts = [];
+        }
         
         if (userAccounts.length === 0) {
           setVideos([]);
@@ -49,14 +57,16 @@ export function VideoList({ userRole }: VideoListProps) {
 
         // Get videos for these accounts
         const accountIds = userAccounts.map((acc: any) => acc._id);
-        const videosResponse = await axios.get('/videos', {
+        const videosResponse = await api.get('/videos', {
           params: { accountIds: accountIds.join(',') }
         });
         
-        setVideos(videosResponse.data || []);
+        const videosData = videosResponse.data;
+        setVideos(Array.isArray(videosData) ? videosData : []);
       }
     } catch (error: any) {
       console.error('Error fetching videos:', error);
+      setVideos([]); // Set empty array on error
       toast({
         title: "Error",
         description: "Failed to load videos",
@@ -68,32 +78,48 @@ export function VideoList({ userRole }: VideoListProps) {
   };
 
   const handleApprove = async (videoId: string, notes: string = '') => {
+    if (publishingVideoId) {
+      // Already publishing a video, ignore additional clicks
+      return;
+    }
+    
     try {
-      await axios.patch(`/videos/${videoId}/status`, {
+      setPublishingVideoId(videoId);
+      
+      // Update status to approved - this will automatically publish to YouTube if tokens are available
+      await api.patch(`/videos/${videoId}/status`, {
         status: 'approved',
         adminNotes: notes || 'Video approved for publishing'
       });
       
       toast({
         title: "Success",
-        description: "Video approved and will be published to YouTube",
+        description: "Video approved and published to YouTube successfully!",
       });
       
       setIsPreviewOpen(false);
       setAdminNotes('');
       fetchVideos();
-    } catch (error) {
+    } catch (error: any) {
+      console.error('Approve/publish error:', error);
       toast({
         title: "Error",
-        description: "Failed to approve video",
+        description: error.response?.data?.error || "Failed to approve and publish video",
         variant: "destructive",
       });
+    } finally {
+      setPublishingVideoId(null);
     }
   };
 
   const handleReject = async (videoId: string, notes: string = '') => {
+    if (publishingVideoId) {
+      // Already processing a video action, ignore additional clicks
+      return;
+    }
+    
     try {
-      await axios.patch(`/videos/${videoId}/status`, {
+      await api.patch(`/videos/${videoId}/status`, {
         status: 'rejected',
         adminNotes: notes || 'Video rejected by moderator'
       });
@@ -127,6 +153,7 @@ export function VideoList({ userRole }: VideoListProps) {
       case 'approved': return 'bg-gradient-to-r from-green-500 to-emerald-500 text-white';
       case 'rejected': return 'bg-gradient-to-r from-red-500 to-pink-500 text-white';
       case 'published': return 'bg-gradient-to-r from-blue-500 to-indigo-500 text-white';
+      case 'failed': return 'bg-gradient-to-r from-red-600 to-red-700 text-white';
       default: return 'bg-gradient-to-r from-gray-500 to-slate-500 text-white';
     }
   };
@@ -288,15 +315,26 @@ export function VideoList({ userRole }: VideoListProps) {
                           size="sm"
                           onClick={() => handleApprove(video._id)}
                           className="border-green-300 text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20"
+                          disabled={publishingVideoId === video._id}
                         >
-                          <Check className="h-4 w-4 mr-2" />
-                          Approve
+                          {publishingVideoId === video._id ? (
+                            <>
+                              <div className="h-4 w-4 mr-2 animate-spin rounded-full border-2 border-green-600 border-t-transparent" />
+                              Publishing...
+                            </>
+                          ) : (
+                            <>
+                              <Check className="h-4 w-4 mr-2" />
+                              Approve
+                            </>
+                          )}
                         </Button>
                         <Button
                           variant="outline"
                           size="sm"
                           onClick={() => handleReject(video._id)}
                           className="border-red-300 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"
+                          disabled={publishingVideoId !== null}
                         >
                           <X className="h-4 w-4 mr-2" />
                           Reject
@@ -417,14 +455,25 @@ export function VideoList({ userRole }: VideoListProps) {
                       <Button
                         onClick={() => handleApprove(previewVideo._id, adminNotes)}
                         className="flex-1 bg-green-600 hover:bg-green-700"
+                        disabled={publishingVideoId === previewVideo._id}
                       >
-                        <Check className="h-4 w-4 mr-2" />
-                        Approve & Publish
+                        {publishingVideoId === previewVideo._id ? (
+                          <>
+                            <div className="h-4 w-4 mr-2 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                            Publishing...
+                          </>
+                        ) : (
+                          <>
+                            <Check className="h-4 w-4 mr-2" />
+                            Approve & Publish
+                          </>
+                        )}
                       </Button>
                       <Button
                         variant="destructive"
                         onClick={() => handleReject(previewVideo._id, adminNotes)}
                         className="flex-1"
+                        disabled={publishingVideoId === previewVideo._id}
                       >
                         <X className="h-4 w-4 mr-2" />
                         Reject
@@ -432,6 +481,7 @@ export function VideoList({ userRole }: VideoListProps) {
                       <Button
                         variant="outline"
                         onClick={() => setIsPreviewOpen(false)}
+                        disabled={publishingVideoId === previewVideo._id}
                       >
                         Cancel
                       </Button>
