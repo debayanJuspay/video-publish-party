@@ -846,20 +846,25 @@ app.post('/api/videos/:videoId/publish', authenticateToken, async (req, res) => 
     console.log('Found account with YouTube credentials:', account.name);
     
     // Verify user has permission to publish
-    const userRole = await db.collection('userRoles').findOne({
-      $or: [
-        { userId: req.user.userType === 'email' ? new ObjectId(req.user.userId) : req.user.userId },
-        { userId: req.user.userId },
-        { userId: new ObjectId(req.user.userId) }
-      ],
-      $or: [
-        { accountId: new ObjectId(video.accountId) },
-        { accountId: null } // Global admin
-      ]
-    });
-    
-    if (!userRole || userRole.role !== 'owner') {
-      return res.status(403).json({ error: 'Access denied. Only account owners can publish videos.' });
+    if (req.user.role === 'admin') {
+      console.log('👑 Admin user - allowing YouTube publish for any account');
+    } else {
+      // For non-admin users, check if they have owner role for this account
+      const userRole = await db.collection('userRoles').findOne({
+        $or: [
+          { userId: req.user.userType === 'email' ? new ObjectId(req.user.userId) : req.user.userId },
+          { userId: req.user.userId },
+          { userId: new ObjectId(req.user.userId) }
+        ],
+        $or: [
+          { accountId: new ObjectId(video.accountId) },
+          { accountId: null } // Global admin
+        ]
+      });
+      
+      if (!userRole || userRole.role !== 'owner') {
+        return res.status(403).json({ error: 'Access denied. Only account owners can publish videos.' });
+      }
     }
     
     try {

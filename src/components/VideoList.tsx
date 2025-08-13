@@ -86,11 +86,14 @@ export function VideoList({ userRole }: VideoListProps) {
     try {
       setPublishingVideoId(videoId);
       
-      // Update status to approved - this will automatically publish to YouTube if tokens are available
+      // First approve the video
       await api.patch(`/videos/${videoId}/status`, {
         status: 'approved',
         adminNotes: notes || 'Video approved for publishing'
       });
+      
+      // Then publish to YouTube
+      await api.post(`/videos/${videoId}/publish`);
       
       toast({
         title: "Success",
