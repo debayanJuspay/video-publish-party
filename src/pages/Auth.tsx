@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
 import { Mail, User, Shield, ArrowLeft, Zap } from 'lucide-react';
+import { Logo } from '@/components/Logo';
 import api from '@/lib/api';
 
 declare global {
@@ -144,10 +145,10 @@ export default function Auth() {
               <span className="text-sm font-medium text-white">Secure Authentication</span>
             </div>
             
-            {/* VideoHub title */}
-            <h1 className="text-4xl font-bold mb-2 bg-gradient-to-r from-white via-purple-200 to-blue-200 bg-clip-text text-transparent">
-              VideoHub
-            </h1>
+            {/* VideoHub title - keeping the original name */}
+            <div className="mb-4">
+              <Logo size="md" className="justify-center" />
+            </div>
             <p className="text-gray-300 text-lg">Welcome back</p>
           </div>
 

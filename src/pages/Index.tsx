@@ -1,8 +1,9 @@
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { Play, Upload, Users, CheckCircle, ArrowRight, Star, Zap } from "lucide-react";
+import { Logo } from "@/components/Logo";
 
 const Index = () => {
   const { user } = useAuth();
@@ -63,16 +64,22 @@ const Index = () => {
             </div>
 
             {/* Main heading with gradient text */}
-            <h1 className="text-7xl md:text-8xl font-bold mb-6 bg-gradient-to-r from-white via-purple-200 to-blue-200 bg-clip-text text-transparent leading-tight">
+            <div className="mb-8">
+              <Logo size="lg" className="justify-center mb-4" />
+            </div>
+            <h1 className="text-5xl md:text-6xl font-bold mb-6 bg-gradient-to-r from-white via-purple-200 to-blue-200 bg-clip-text text-transparent leading-tight">
               VideoHub
             </h1>
+            <p className="text-xl md:text-2xl mb-4 text-gray-200 leading-relaxed max-w-4xl mx-auto font-light">
+              Professional Video Publishing Platform
+            </p>
             
             {/* Subtitle */}
             <p className="text-xl md:text-2xl mb-4 text-gray-200 leading-relaxed max-w-4xl mx-auto font-light">
-              Streamline your video content workflow.
+              Streamline your video publishing workflow with professional team collaboration.
             </p>
             <p className="text-lg md:text-xl mb-12 text-gray-300 leading-relaxed max-w-4xl mx-auto">
-              Upload, review, and publish videos to YouTube with seamless team collaboration.
+              Upload, review, approve, and publish videos to YouTube with seamless workflow management.
             </p>
 
             {/* CTA Buttons */}
@@ -138,6 +145,34 @@ const Index = () => {
           </div>
         </div>
       </div>
+
+      {/* Footer */}
+      <footer className="relative z-10 border-t border-white/10 bg-black/20 backdrop-blur-sm">
+        <div className="container mx-auto px-4 py-8">
+          <div className="flex flex-col md:flex-row justify-between items-center">
+            <div className="mb-4 md:mb-0">
+              <Logo size="sm" className="justify-center md:justify-start" />
+            </div>
+            <div className="flex flex-col md:flex-row items-center gap-6 text-sm text-gray-300">
+              <span>© {new Date().getFullYear()} VideoHub. All rights reserved.</span>
+              <div className="flex gap-6">
+                <Link 
+                  to="/privacy" 
+                  className="hover:text-white transition-colors duration-200"
+                >
+                  Privacy Policy
+                </Link>
+                <Link 
+                  to="/terms" 
+                  className="hover:text-white transition-colors duration-200"
+                >
+                  Terms of Service
+                </Link>
+              </div>
+            </div>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 };
