@@ -574,19 +574,25 @@ app.get('/accounts', authenticateToken, async (req, res) => {
 
     console.log('📋 User roles found:', userRoles.length);
 
-    // Admin users should see ALL accounts in the system
+    // Admin users should only see accounts where they are the actual owner
     if (user.role === 'admin') {
-      console.log('👑 Admin user detected - returning ALL accounts');
+      console.log('👑 Admin user detected - returning only accounts where user is owner');
       
-      // Get all accounts in the system
-      const allAccounts = await db.collection('accounts').find({}).toArray();
+      // Get only accounts where the user is the owner (either by ownerId or youtubeAuthorizedBy)
+      const ownedAccounts = await db.collection('accounts').find({
+        $or: [
+          { ownerId: req.user.userId },
+          { youtubeAuthorizedBy: req.user.userId }
+        ]
+      }).toArray();
       
-      const accountsWithRoles = allAccounts.map(account => ({
+      // Mark all returned accounts as owned by the user
+      const accountsWithRoles = ownedAccounts.map(account => ({
         ...account,
-        userRole: 'owner' // Mark as owner for all accounts for admin users
+        userRole: 'owner'
       }));
       
-      console.log('✅ Returning', accountsWithRoles.length, 'accounts to admin user');
+      console.log('✅ Returning', accountsWithRoles.length, 'owned accounts to admin user');
       return res.json(accountsWithRoles);
     }
 
@@ -601,14 +607,16 @@ app.get('/accounts', authenticateToken, async (req, res) => {
       _id: { $in: accountIds }
     }).toArray();
 
-    // Email users (editors): show accounts where they have editor role
-    const accountsWithRoles = accounts.map(account => {
-      const userRole = userRoles.find(ur => ur.accountId.equals(account._id));
-      return {
-        ...account,
-        userRole: userRole ? userRole.role : 'editor'
-      };
-    });
+    // Filter to return only accounts where user has 'owner' role
+    const accountsWithRoles = accounts
+      .map(account => {
+        const userRole = userRoles.find(ur => ur.accountId.equals(account._id));
+        return {
+          ...account,
+          userRole: userRole ? userRole.role : 'editor'
+        };
+      })
+      .filter(account => account.userRole === 'owner'); // Only return owner accounts
 
     res.json(accountsWithRoles);
   } catch (error) {
@@ -635,25 +643,26 @@ app.get('/accounts/youtube-accessible', authenticateToken, async (req, res) => {
     let accessibleAccounts = [];
 
     if (user.role === 'admin') {
-      // For Google OAuth admins: only show accounts where they are the owner
-      // AND the account has YouTube tokens AND the tokens were authorized by this specific Google user
-      const userRoles = await db.collection('userRoles').find({
-        userId: req.user.userId,
-        role: 'owner'
-      }).toArray();
-
-      const accountIds = userRoles.map(ur => ur.accountId);
-      const accounts = await db.collection('accounts').find({
-        _id: { $in: accountIds },
+      // For Google OAuth admins: show accounts where they are the owner (ownerId OR youtubeAuthorizedBy matches)
+      // AND the account has YouTube tokens
+      const allAccounts = await db.collection('accounts').find({
         youtubeAccessToken: { $exists: true },  // Only accounts with YouTube authorization
-        youtubeAuthorizedBy: req.user.userId    // Only accounts authorized by this specific user
+        $or: [
+          { ownerId: req.user.userId },           // Accounts they created
+          { youtubeAuthorizedBy: req.user.userId } // Accounts they authorized for YouTube
+        ]
       }).toArray();
 
-      accessibleAccounts = accounts.map(account => {
-        const userRole = userRoles.find(ur => ur.accountId.equals(account._id));
+      accessibleAccounts = allAccounts.map(account => {
+        // Determine user role based on ownership
+        let userRole = 'editor';
+        if (account.ownerId === req.user.userId || account.youtubeAuthorizedBy === req.user.userId) {
+          userRole = 'owner';
+        }
+        
         return {
           ...account,
-          userRole: userRole.role
+          userRole
         };
       });
     } else {

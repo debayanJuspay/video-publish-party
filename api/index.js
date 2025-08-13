@@ -538,19 +538,25 @@ app.get('/api/accounts', authenticateToken, async (req, res) => {
     let userRoles = [];
     
     try {
-      // For admin users, they should see ALL accounts in the system
+      // For admin users, they should only see accounts where they are the actual owner
       if (req.user.role === 'admin') {
-        console.log('👑 Admin user detected - returning ALL accounts');
+        console.log('👑 Admin user detected - returning only accounts where user is owner');
         
-        // Global admin can see ALL accounts in the system
-        const allAccounts = await db.collection('accounts').find({}).toArray();
+        // Get only accounts where the user is the owner (either by ownerId or youtubeAuthorizedBy)
+        const ownedAccounts = await db.collection('accounts').find({
+          $or: [
+            { ownerId: userId },
+            { youtubeAuthorizedBy: userId }
+          ]
+        }).toArray();
         
-        const accountsWithRoles = allAccounts.map(account => ({
+        // Mark all returned accounts as owned by the user
+        const accountsWithRoles = ownedAccounts.map(account => ({
           ...account,
-          userRole: 'owner' // Mark as owner for all accounts for admin users
+          userRole: 'owner'
         }));
         
-        console.log('✅ Returning', accountsWithRoles.length, 'accounts to admin user');
+        console.log('✅ Returning', accountsWithRoles.length, 'owned accounts to admin user');
         return res.json(accountsWithRoles || []);
       }
       
@@ -585,14 +591,16 @@ app.get('/api/accounts', authenticateToken, async (req, res) => {
       _id: { $in: accountIds }
     }).toArray();
 
-    // Return all accounts where user has any role (owner or editor)
-    const accountsWithRoles = accounts.map(account => {
-      const userRole = userRoles.find(ur => ur.accountId.equals(account._id));
-      return {
-        ...account,
-        userRole: userRole ? userRole.role : 'editor'
-      };
-    });
+    // Filter to return only accounts where user has 'owner' role
+    const accountsWithRoles = accounts
+      .map(account => {
+        const userRole = userRoles.find(ur => ur.accountId.equals(account._id));
+        return {
+          ...account,
+          userRole: userRole ? userRole.role : 'editor'
+        };
+      })
+      .filter(account => account.userRole === 'owner'); // Only return owner accounts
 
     console.log('✅ Final response for accounts endpoint:', {
       userId: userId,

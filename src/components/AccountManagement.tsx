@@ -42,9 +42,27 @@ export function AccountManagement({ userRole }: AccountManagementProps) {
       const response = await api.get('/accounts');
       const userAccounts = response.data || [];
       
+      console.log('[AccountManagement] Raw API response:', response);
+      console.log('[AccountManagement] Accounts received:', userAccounts);
+      console.log('[AccountManagement] Number of accounts:', userAccounts.length);
+      
+      // Debug ownership information
+      userAccounts.forEach((account, index) => {
+        console.log(`[AccountManagement] Account ${index + 1}:`, {
+          name: account.name,
+          ownerId: account.ownerId,
+          youtubeAuthorizedBy: account.youtubeAuthorizedBy,
+          userRole: account.userRole,
+          currentUserId: user?.id
+        });
+      });
+      
       setAccounts(userAccounts);
-      if (userAccounts.length > 0 && !selectedAccountId) {
-        setSelectedAccountId(userAccounts[0]._id);
+      
+      // Set selected account to first owner account if available
+      const ownerAccounts = userAccounts.filter(account => account.userRole === 'owner');
+      if (ownerAccounts.length > 0 && !selectedAccountId) {
+        setSelectedAccountId(ownerAccounts[0]._id);
       }
     } catch (error: any) {
       console.error('Error fetching accounts:', error);
@@ -239,6 +257,9 @@ export function AccountManagement({ userRole }: AccountManagementProps) {
     return <AccountSkeleton />;
   }
 
+  console.log('[AccountManagement] Current accounts state:', accounts);
+  console.log('[AccountManagement] Selected account ID:', selectedAccountId);
+
   const selectedAccount = accounts.find(acc => acc._id === selectedAccountId);
   const isOwner = selectedAccount?.userRole === 'owner';
 
@@ -324,60 +345,69 @@ export function AccountManagement({ userRole }: AccountManagementProps) {
           </p>
         </div>
         
-        {accounts.length === 0 ? (
-          <div className="text-center py-12">
-            <div className="w-20 h-20 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-blue-100 to-purple-100 dark:from-blue-900/20 dark:to-purple-900/20 flex items-center justify-center">
-              <Users className="h-10 w-10 text-blue-600 dark:text-blue-400" />
-            </div>
-            <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">No accounts found</h3>
-            <p className="text-gray-600 dark:text-gray-300 mb-4">Create your first account above to get started!</p>
-            <p className="text-sm text-gray-500 dark:text-gray-400">
-              Once you create an account, you'll be able to upload videos, manage team members, and publish to YouTube.
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {accounts.map((account) => (
-              <div
-                key={account._id}
-                className={`group p-6 rounded-xl border-2 cursor-pointer transition-all duration-300 hover:shadow-lg ${
-                  selectedAccountId === account._id
-                    ? 'border-blue-500 bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-900/20 dark:to-purple-900/20 shadow-md'
-                    : 'border-gray-200 dark:border-gray-700 hover:border-blue-300 dark:hover:border-blue-600 bg-white/50 dark:bg-gray-800/50'
-                }`}
-                onClick={() => setSelectedAccountId(account._id)}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 flex items-center justify-center">
-                      <Users className="h-6 w-6 text-white" />
-                    </div>
-                    <div>
-                      <h3 className="font-semibold text-lg text-gray-900 dark:text-white">{account.name}</h3>
-                      {account.youtubeChannelId && (
-                        <p className="text-sm text-gray-600 dark:text-gray-300">
-                          Channel ID: {account.youtubeChannelId}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <Badge 
-                      variant={account.userRole === 'owner' ? 'default' : 'secondary'}
-                      className={`${
-                        account.userRole === 'owner' 
-                          ? 'bg-gradient-to-r from-green-500 to-emerald-500 text-white' 
-                          : 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300'
-                      } px-3 py-1 font-medium`}
-                    >
-                      {account.userRole}
-                    </Badge>
-                  </div>
-                </div>
+        {(() => {
+          // Filter to only show accounts where user has "owner" role
+          const ownerAccounts = accounts.filter(account => account.userRole === 'owner');
+          console.log('[AccountManagement] Owner accounts filtered:', ownerAccounts.length, 'out of', accounts.length, 'total accounts');
+          
+          return ownerAccounts.length === 0 ? (
+            <div className="text-center py-12">
+              <div className="w-20 h-20 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-blue-100 to-purple-100 dark:from-blue-900/20 dark:to-purple-900/20 flex items-center justify-center">
+                <Users className="h-10 w-10 text-blue-600 dark:text-blue-400" />
               </div>
-            ))}
-          </div>
-        )}
+              <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">No accounts found</h3>
+              <p className="text-gray-600 dark:text-gray-300 mb-4">Create your first account above to get started!</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                Once you create an account, you'll be able to upload videos, manage team members, and publish to YouTube.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {ownerAccounts.map((account) => {
+                console.log('[AccountManagement] Rendering owner account:', account);
+                return (
+                  <div
+                    key={account._id}
+                    className={`group p-6 rounded-xl border-2 cursor-pointer transition-all duration-300 hover:shadow-lg ${
+                      selectedAccountId === account._id
+                        ? 'border-blue-500 bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-900/20 dark:to-purple-900/20 shadow-md'
+                        : 'border-gray-200 dark:border-gray-700 hover:border-blue-300 dark:hover:border-blue-600 bg-white/50 dark:bg-gray-800/50'
+                    }`}
+                    onClick={() => setSelectedAccountId(account._id)}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-4">
+                        <div className="w-12 h-12 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 flex items-center justify-center">
+                          <Users className="h-6 w-6 text-white" />
+                        </div>
+                        <div>
+                          <h3 className="font-semibold text-lg text-gray-900 dark:text-white">{account.name}</h3>
+                          {account.youtubeChannelId && (
+                            <p className="text-sm text-gray-600 dark:text-gray-300">
+                              Channel ID: {account.youtubeChannelId}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <Badge 
+                          variant={account.userRole === 'owner' ? 'default' : 'secondary'}
+                          className={`${
+                            account.userRole === 'owner' 
+                              ? 'bg-gradient-to-r from-green-500 to-emerald-500 text-white' 
+                              : 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300'
+                          } px-3 py-1 font-medium`}
+                        >
+                          {account.userRole}
+                        </Badge>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()}
       </div>
 
       {/* YouTube Authorization */}
