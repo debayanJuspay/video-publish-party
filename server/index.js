@@ -574,7 +574,23 @@ app.get('/accounts', authenticateToken, async (req, res) => {
 
     console.log('📋 User roles found:', userRoles.length);
 
-    // If user has no roles, return empty array
+    // Admin users should see ALL accounts in the system
+    if (user.role === 'admin') {
+      console.log('👑 Admin user detected - returning ALL accounts');
+      
+      // Get all accounts in the system
+      const allAccounts = await db.collection('accounts').find({}).toArray();
+      
+      const accountsWithRoles = allAccounts.map(account => ({
+        ...account,
+        userRole: 'owner' // Mark as owner for all accounts for admin users
+      }));
+      
+      console.log('✅ Returning', accountsWithRoles.length, 'accounts to admin user');
+      return res.json(accountsWithRoles);
+    }
+
+    // For non-admin users, check their specific roles
     if (userRoles.length === 0) {
       console.log('❌ No roles found for user, returning empty accounts');
       return res.json([]);
@@ -585,26 +601,12 @@ app.get('/accounts', authenticateToken, async (req, res) => {
       _id: { $in: accountIds }
     }).toArray();
 
-    // Filter accounts based on user role
-    if (user.role === 'admin') {
-      // Google OAuth admins: only show accounts they own
-      accounts = accounts.filter(account => {
-        const userRole = userRoles.find(ur => ur.accountId.equals(account._id));
-        return userRole && userRole.role === 'owner';
-      });
-    } else {
-      // Email users (editors): show accounts where they have editor role
-      accounts = accounts.filter(account => {
-        const userRole = userRoles.find(ur => ur.accountId.equals(account._id));
-        return userRole && userRole.role === 'editor';
-      });
-    }
-
+    // Email users (editors): show accounts where they have editor role
     const accountsWithRoles = accounts.map(account => {
       const userRole = userRoles.find(ur => ur.accountId.equals(account._id));
       return {
         ...account,
-        userRole: userRole.role
+        userRole: userRole ? userRole.role : 'editor'
       };
     });
 

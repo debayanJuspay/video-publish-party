@@ -538,83 +538,35 @@ app.get('/api/accounts', authenticateToken, async (req, res) => {
     let userRoles = [];
     
     try {
-      // For admin users, check if they have global admin privileges
+      // For admin users, they should see ALL accounts in the system
       if (req.user.role === 'admin') {
-        console.log('👑 Admin user - checking for global admin privileges');
+        console.log('👑 Admin user detected - returning ALL accounts');
         
-        // Check if user has global admin role
-        const globalAdminRole = await db.collection('userRoles').findOne({
-          userId: userId,
-          role: 'owner',
+        // Global admin can see ALL accounts in the system
+        const allAccounts = await db.collection('accounts').find({}).toArray();
+        
+        const accountsWithRoles = allAccounts.map(account => ({
+          ...account,
+          userRole: 'owner' // Mark as owner for all accounts for admin users
+        }));
+        
+        console.log('✅ Returning', accountsWithRoles.length, 'accounts to admin user');
+        return res.json(accountsWithRoles || []);
+      }
+      
+      // For non-admin users, get roles normally
+      if (req.user.userType === 'email') {
+        userRoles = await db.collection('userRoles').find({
           $or: [
-            { isGlobalAdmin: true },
-            { accountId: null }
+            { userId: new ObjectId(userId) },  // ObjectId format
+            { userId: userId }                  // String format
           ]
-        });
-        
-        if (globalAdminRole) {
-          console.log('🌟 Global admin detected - returning ALL accounts');
-          
-          // Global admin can see ALL accounts in the system
-          const allAccounts = await db.collection('accounts').find({}).toArray();
-          
-          const accountsWithRoles = allAccounts.map(account => ({
-            ...account,
-            userRole: 'owner' // Mark as owner for all accounts
-          }));
-          
-          console.log('✅ Returning', accountsWithRoles.length, 'accounts to global admin');
-          return res.json(accountsWithRoles || []);
-        }
-        
-        // If admin but not super admin, get accounts they own directly
-        console.log('👑 Regular admin - checking owned accounts');
-        
-        const ownedAccounts = await db.collection('accounts').find({
-          ownerId: userId
         }).toArray();
-        
-        console.log('📋 Admin owned accounts:', ownedAccounts.length);
-        
-        // For each owned account, ensure there's a corresponding userRole entry
-        for (const account of ownedAccounts) {
-          const existingRole = await db.collection('userRoles').findOne({
-            userId: userId,
-            accountId: account._id
-          });
-          
-          if (!existingRole) {
-            console.log('🔧 Creating missing owner role for account:', account.name);
-            // Create missing owner role
-            await db.collection('userRoles').insertOne({
-              userId: userId,
-              accountId: account._id,
-              role: 'owner',
-              createdAt: new Date()
-            });
-          }
-        }
-        
-        // Now get all user roles for this admin
+      } else {
+        // For Google users, userId is the googleId (string)
         userRoles = await db.collection('userRoles').find({
           userId: userId
         }).toArray();
-        
-      } else {
-        // For non-admin users, get roles normally
-        if (req.user.userType === 'email') {
-          userRoles = await db.collection('userRoles').find({
-            $or: [
-              { userId: new ObjectId(userId) },  // ObjectId format
-              { userId: userId }                  // String format
-            ]
-          }).toArray();
-        } else {
-          // For Google users, userId is the googleId (string)
-          userRoles = await db.collection('userRoles').find({
-            userId: userId
-          }).toArray();
-        }
       }
     } catch (error) {
       console.error('Error finding user roles:', error);
