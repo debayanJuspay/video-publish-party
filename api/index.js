@@ -17,7 +17,7 @@ const app = express();
 // Middleware
 app.use(cors({
   origin: process.env.NODE_ENV === 'production' 
-    ? [process.env.FRONTEND_URL, 'https://videohub-brown-alpha.vercel.app'] 
+    ? [process.env.FRONTEND_URL, 'https://www.videohub.world', 'https://videohub-brown-alpha.vercel.app'] 
     : ['http://localhost:5173', 'http://localhost:3000', 'http://localhost:8080'],
   credentials: true
 }));
@@ -67,7 +67,7 @@ const oauth2Client = new OAuth2Client(
   process.env.GOOGLE_CLIENT_ID,
   process.env.GOOGLE_CLIENT_SECRET,
   process.env.NODE_ENV === 'production' 
-    ? 'https://videohub-brown-alpha.vercel.app'
+    ? 'https://www.videohub.world'
     : 'http://localhost:8080'
 );
 
@@ -76,7 +76,7 @@ const youtubeOauth2Client = new OAuth2Client(
   process.env.GOOGLE_CLIENT_ID,
   process.env.GOOGLE_CLIENT_SECRET,
   process.env.NODE_ENV === 'production' 
-    ? 'https://videohub-brown-alpha.vercel.app/api/auth/youtube/callback'
+    ? 'https://www.videohub.world/api/auth/youtube/callback'
     : 'http://localhost:3001/api/auth/youtube/callback'
 );
 
