@@ -591,7 +591,7 @@ app.get('/api/accounts', authenticateToken, async (req, res) => {
       _id: { $in: accountIds }
     }).toArray();
 
-    // Filter to return only accounts where user has 'owner' role
+    // Return accounts with their respective roles (both owner and editor)
     const accountsWithRoles = accounts
       .map(account => {
         const userRole = userRoles.find(ur => ur.accountId.equals(account._id));
@@ -599,8 +599,8 @@ app.get('/api/accounts', authenticateToken, async (req, res) => {
           ...account,
           userRole: userRole ? userRole.role : 'editor'
         };
-      })
-      .filter(account => account.userRole === 'owner'); // Only return owner accounts
+      });
+      // Remove the filter - return all accounts the user has access to (owner or editor)
 
     console.log('✅ Final response for accounts endpoint:', {
       userId: userId,

@@ -59,10 +59,9 @@ export function AccountManagement({ userRole }: AccountManagementProps) {
       
       setAccounts(userAccounts);
       
-      // Set selected account to first owner account if available
-      const ownerAccounts = userAccounts.filter(account => account.userRole === 'owner');
-      if (ownerAccounts.length > 0 && !selectedAccountId) {
-        setSelectedAccountId(ownerAccounts[0]._id);
+      // Set selected account to first accessible account if available
+      if (userAccounts.length > 0 && !selectedAccountId) {
+        setSelectedAccountId(userAccounts[0]._id);
       }
     } catch (error: any) {
       console.error('Error fetching accounts:', error);
@@ -341,29 +340,29 @@ export function AccountManagement({ userRole }: AccountManagementProps) {
             Your Accounts
           </h3>
           <p className="text-gray-600 dark:text-gray-300 mt-2">
-            Manage your YouTube accounts and permissions
+            YouTube accounts you own or can edit
           </p>
         </div>
         
         {(() => {
-          // Filter to only show accounts where user has "owner" role
-          const ownerAccounts = accounts.filter(account => account.userRole === 'owner');
-          console.log('[AccountManagement] Owner accounts filtered:', ownerAccounts.length, 'out of', accounts.length, 'total accounts');
+          // Show all accounts the user has access to (both owner and editor)
+          const accessibleAccounts = accounts;
+          console.log('[AccountManagement] Accessible accounts:', accessibleAccounts.length, 'total accounts');
           
-          return ownerAccounts.length === 0 ? (
+          return accessibleAccounts.length === 0 ? (
             <div className="text-center py-12">
               <div className="w-20 h-20 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-blue-100 to-purple-100 dark:from-blue-900/20 dark:to-purple-900/20 flex items-center justify-center">
                 <Users className="h-10 w-10 text-blue-600 dark:text-blue-400" />
               </div>
-              <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">No accounts found</h3>
-              <p className="text-gray-600 dark:text-gray-300 mb-4">Create your first account above to get started!</p>
+              <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">No accounts available</h3>
+              <p className="text-gray-600 dark:text-gray-300 mb-4">You don't have access to any YouTube accounts yet.</p>
               <p className="text-sm text-gray-500 dark:text-gray-400">
-                Once you create an account, you'll be able to upload videos, manage team members, and publish to YouTube.
+                Create a new account above, or ask an account owner to add you as an editor.
               </p>
             </div>
           ) : (
             <div className="space-y-4">
-              {ownerAccounts.map((account) => {
+              {accessibleAccounts.map((account) => {
                 console.log('[AccountManagement] Rendering owner account:', account);
                 return (
                   <div
@@ -395,10 +394,17 @@ export function AccountManagement({ userRole }: AccountManagementProps) {
                           className={`${
                             account.userRole === 'owner' 
                               ? 'bg-gradient-to-r from-green-500 to-emerald-500 text-white' 
-                              : 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300'
+                              : 'bg-gradient-to-r from-blue-500 to-purple-500 text-white'
                           } px-3 py-1 font-medium`}
                         >
-                          {account.userRole}
+                          {account.userRole === 'owner' ? (
+                            <>
+                              <Shield className="h-3 w-3 mr-1" />
+                              Owner
+                            </>
+                          ) : (
+                            'Editor'
+                          )}
                         </Badge>
                       </div>
                     </div>

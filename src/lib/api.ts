@@ -4,7 +4,7 @@ import axios from 'axios';
 const api = axios.create({
   baseURL: process.env.NODE_ENV === 'production' 
     ? '/api'  // In production (Vercel), use relative URLs that go to serverless functions
-    : 'http://localhost:3001',  // In development, use local server
+    : 'http://localhost:3001/api',  // In development, use local server with /api prefix
   headers: {
     'Content-Type': 'application/json',
     'Cache-Control': 'no-cache, no-store, must-revalidate',
