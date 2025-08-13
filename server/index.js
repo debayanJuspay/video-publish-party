@@ -1452,6 +1452,37 @@ app.post('/accounts/:accountId/youtube-token', authenticateToken, async (req, re
 // Get YouTube authorization URL
 app.get('/youtube/auth-url/:accountId', authenticateToken, async (req, res) => {
   try {
+    const { accountId } = req.params;
+    
+    console.log('YouTube auth request for account:', accountId, 'by user:', req.user.userId, 'role:', req.user.role);
+    
+    // Get user info to check if they're admin
+    let user;
+    const query = req.user.userType === 'email' 
+      ? { _id: new ObjectId(req.user.userId) }
+      : { googleId: req.user.userId };
+    
+    user = await db.collection('users').findOne(query);
+    
+    // Admin users can authorize YouTube for any account
+    if (user && user.role === 'admin') {
+      console.log('👑 Admin user - allowing YouTube authorization for any account');
+    } else {
+      // For non-admin users, verify they have access to this account
+      const accountObjectId = new ObjectId(accountId);
+      const userRole = await db.collection('userRoles').findOne({
+        userId: req.user.userId,
+        accountId: accountObjectId
+      });
+      
+      console.log('User role found:', userRole);
+      
+      if (!userRole || userRole.role !== 'owner') {
+        console.log('Access denied for user:', req.user.userId, 'role:', userRole?.role);
+        return res.status(403).json({ error: 'Access denied. Only account owners can authorize YouTube.' });
+      }
+    }
+    
     // Use the redirect URI that matches your Google Cloud Console configuration
     const redirectUri = `http://localhost:3001/auth/youtube/callback`;
     const state = `${req.params.accountId}:${req.user.userId}`; // Pass account ID and user ID as state parameter

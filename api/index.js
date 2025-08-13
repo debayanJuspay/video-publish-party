@@ -1111,23 +1111,28 @@ app.get('/api/youtube/auth-url/:accountId', authenticateToken, async (req, res) 
     const { accountId } = req.params;
     const db = await connectToMongoDB();
     
-    console.log('YouTube auth request for account:', accountId, 'by user:', req.user.userId);
+    console.log('YouTube auth request for account:', accountId, 'by user:', req.user.userId, 'role:', req.user.role);
     
-    // Verify user has access to this account
-    const accountObjectId = new ObjectId(accountId);
-    const userRole = await db.collection('userRoles').findOne({
-      $or: [
-        { userId: req.user.userType === 'email' ? new ObjectId(req.user.userId) : req.user.userId },
-        { userId: req.user.userId }
-      ],
-      accountId: accountObjectId
-    });
-    
-    console.log('User role found:', userRole);
-    
-    if (!userRole || userRole.role !== 'owner') {
-      console.log('Access denied for user:', req.user.userId, 'role:', userRole?.role);
-      return res.status(403).json({ error: 'Access denied. Only account owners can authorize YouTube.' });
+    // Admin users can authorize YouTube for any account
+    if (req.user.role === 'admin') {
+      console.log('👑 Admin user - allowing YouTube authorization for any account');
+    } else {
+      // For non-admin users, verify they have access to this account
+      const accountObjectId = new ObjectId(accountId);
+      const userRole = await db.collection('userRoles').findOne({
+        $or: [
+          { userId: req.user.userType === 'email' ? new ObjectId(req.user.userId) : req.user.userId },
+          { userId: req.user.userId }
+        ],
+        accountId: accountObjectId
+      });
+      
+      console.log('User role found:', userRole);
+      
+      if (!userRole || userRole.role !== 'owner') {
+        console.log('Access denied for user:', req.user.userId, 'role:', userRole?.role);
+        return res.status(403).json({ error: 'Access denied. Only account owners can authorize YouTube.' });
+      }
     }
     
     // Generate authorization URL with YouTube scope
