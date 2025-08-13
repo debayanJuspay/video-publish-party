@@ -661,12 +661,36 @@ app.get('/api/videos', authenticateToken, async (req, res) => {
     
     const db = await connectToMongoDB();
     
-    // Get user roles to determine accessible accounts
-    const userRoles = await db.collection('userRoles').find({
-      userId: req.user.userId
-    }).toArray();
+    console.log('🎥 Videos request:', {
+      userId: req.user.userId,
+      userRole: req.user.role,
+      accountIds: accountIds
+    });
+    
+    let accessibleAccountIds = [];
+    
+    // For admin users, get accounts where they are the actual owner
+    if (req.user.role === 'admin') {
+      console.log('👑 Admin user detected - getting owned accounts for videos');
+      
+      const ownedAccounts = await db.collection('accounts').find({
+        $or: [
+          { ownerId: req.user.userId },
+          { youtubeAuthorizedBy: req.user.userId }
+        ]
+      }).toArray();
+      
+      accessibleAccountIds = ownedAccounts.map(acc => acc._id.toString());
+      console.log('✅ Admin owned accounts for videos:', accessibleAccountIds.length);
+    } else {
+      // For non-admin users, get user roles to determine accessible accounts
+      const userRoles = await db.collection('userRoles').find({
+        userId: req.user.userId
+      }).toArray();
 
-    const accessibleAccountIds = userRoles.map(ur => ur.accountId.toString());
+      accessibleAccountIds = userRoles.map(ur => ur.accountId.toString());
+      console.log('✅ User accessible accounts for videos:', accessibleAccountIds.length);
+    }
     
     let filter = {};
     
@@ -675,12 +699,14 @@ app.get('/api/videos', authenticateToken, async (req, res) => {
       const allowedAccountIds = requestedAccountIds.filter(id => accessibleAccountIds.includes(id));
       
       if (allowedAccountIds.length === 0) {
+        console.log('❌ No allowed account IDs for videos');
         return res.json([]);
       }
       
       filter.accountId = { $in: allowedAccountIds };
     } else {
       if (accessibleAccountIds.length === 0) {
+        console.log('❌ No accessible accounts for videos');
         return res.json([]);
       }
       
@@ -691,6 +717,7 @@ app.get('/api/videos', authenticateToken, async (req, res) => {
       .sort({ createdAt: -1 })
       .toArray();
 
+    console.log('✅ Returning', videos.length, 'videos');
     res.json(videos);
   } catch (error) {
     console.error('Get videos error:', error);

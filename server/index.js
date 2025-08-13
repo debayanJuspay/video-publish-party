@@ -733,24 +733,48 @@ app.get('/videos', authenticateToken, async (req, res) => {
   try {
     const { accountIds, uploadedBy } = req.query;
     
-    // Get user's accessible accounts to ensure they can only see videos from accounts they have access to
-    let user;
-    const query = req.user.userType === 'email' 
-      ? { _id: new ObjectId(req.user.userId) }
-      : { googleId: req.user.userId };
+    console.log('🎥 Videos request (local server):', {
+      userId: req.user.userId,
+      userRole: req.user.role,
+      accountIds: accountIds
+    });
     
-    user = await db.collection('users').findOne(query);
+    let accessibleAccountIds = [];
     
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
+    // For admin users, get accounts where they are the actual owner
+    if (req.user.role === 'admin') {
+      console.log('👑 Admin user detected - getting owned accounts for videos');
+      
+      const ownedAccounts = await db.collection('accounts').find({
+        $or: [
+          { ownerId: req.user.userId },
+          { youtubeAuthorizedBy: req.user.userId }
+        ]
+      }).toArray();
+      
+      accessibleAccountIds = ownedAccounts.map(acc => acc._id.toString());
+      console.log('✅ Admin owned accounts for videos:', accessibleAccountIds.length);
+    } else {
+      // Get user's accessible accounts to ensure they can only see videos from accounts they have access to
+      let user;
+      const query = req.user.userType === 'email' 
+        ? { _id: new ObjectId(req.user.userId) }
+        : { googleId: req.user.userId };
+      
+      user = await db.collection('users').findOne(query);
+      
+      if (!user) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+
+      // Get user roles to determine accessible accounts
+      const userRoles = await db.collection('userRoles').find({
+        userId: req.user.userId
+      }).toArray();
+
+      accessibleAccountIds = userRoles.map(ur => ur.accountId.toString());
+      console.log('✅ User accessible accounts for videos:', accessibleAccountIds.length);
     }
-
-    // Get user roles to determine accessible accounts
-    const userRoles = await db.collection('userRoles').find({
-      userId: req.user.userId
-    }).toArray();
-
-    const accessibleAccountIds = userRoles.map(ur => ur.accountId.toString());
     
     let filter = {};
     
@@ -760,14 +784,16 @@ app.get('/videos', authenticateToken, async (req, res) => {
       const allowedAccountIds = requestedAccountIds.filter(id => accessibleAccountIds.includes(id));
       
       if (allowedAccountIds.length === 0) {
-        return res.json([]); // No accessible accounts
+        console.log('❌ No allowed account IDs for videos');
+        return res.json([]);
       }
       
       filter.accountId = { $in: allowedAccountIds };
     } else {
       // No specific accounts requested, show videos from all accessible accounts
       if (accessibleAccountIds.length === 0) {
-        return res.json([]); // No accessible accounts
+        console.log('❌ No accessible accounts for videos');
+        return res.json([]);
       }
       
       filter.accountId = { $in: accessibleAccountIds };
@@ -782,6 +808,7 @@ app.get('/videos', authenticateToken, async (req, res) => {
       .sort({ createdAt: -1 })
       .toArray();
 
+    console.log('✅ Returning', videos.length, 'videos');
     res.json(videos);
   } catch (error) {
     console.error('Get videos error:', error);
