@@ -101,6 +101,27 @@ export function AccountManagement({ userRole }: AccountManagementProps) {
       return;
     }
 
+    // Validate account name length and characters
+    if (newAccountName.trim().length < 2 || newAccountName.trim().length > 50) {
+      toast({
+        title: "Error",
+        description: "Account name must be between 2 and 50 characters",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Check for invalid characters
+    const invalidPatterns = /[<>\"'&\\]/;
+    if (invalidPatterns.test(newAccountName)) {
+      toast({
+        title: "Error",
+        description: "Account name contains invalid characters. Please use only letters, numbers, spaces, and basic punctuation.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     try {
       await api.post('/accounts', {
         name: newAccountName.trim(),
@@ -109,7 +130,7 @@ export function AccountManagement({ userRole }: AccountManagementProps) {
 
       toast({
         title: "Success",
-        description: "Account created successfully",
+        description: "YouTube account created successfully! You can now authorize YouTube to start publishing videos.",
       });
 
       setNewAccountName('');
@@ -290,41 +311,41 @@ export function AccountManagement({ userRole }: AccountManagementProps) {
           </div>
           
           <form onSubmit={createAccount} className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="space-y-2">
-                <Label htmlFor="accountName" className="text-sm font-medium text-gray-700 dark:text-gray-200">
-                  Account Name
-                </Label>
-                <Input
-                  id="accountName"
-                  type="text"
-                  placeholder="Enter account name"
-                  value={newAccountName}
-                  onChange={(e) => setNewAccountName(e.target.value)}
-                  className="glass-input h-12 text-base"
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="channelId" className="text-sm font-medium text-gray-700 dark:text-gray-200">
-                  YouTube Channel ID (Optional)
-                </Label>
-                <Input
-                  id="channelId"
-                  type="text"
-                  placeholder="Enter YouTube channel ID"
-                  value={newChannelId}
-                  onChange={(e) => setNewChannelId(e.target.value)}
-                  className="glass-input h-12 text-base"
-                />
-              </div>
+            <div className="mb-4 p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
+              <p className="text-sm text-yellow-800 dark:text-yellow-200">
+                <strong>⚠️ Important Restrictions:</strong><br/>
+                • You can only create ONE YouTube account<br/>
+                • YouTube authorization must use the same email you're logged in with<br/>
+                • Channel name must be appropriate and professional
+              </p>
             </div>
+            
+            <div className="space-y-2">
+              <Label htmlFor="accountName" className="text-sm font-medium text-gray-700 dark:text-gray-200">
+                Account Display Name
+              </Label>
+              <Input
+                id="accountName"
+                type="text"
+                placeholder="Enter a display name for your YouTube account"
+                value={newAccountName}
+                onChange={(e) => setNewAccountName(e.target.value)}
+                className="glass-input h-12 text-base"
+                minLength={2}
+                maxLength={50}
+                required
+              />
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                This is just a display name for your account (2-50 characters, no special characters)
+              </p>
+            </div>
+            
             <Button 
               type="submit" 
               className="w-full h-12 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-medium rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-[1.02]"
             >
               <Plus className="h-5 w-5 mr-2" />
-              Create Account
+              Create YouTube Account
             </Button>
           </form>
         </div>

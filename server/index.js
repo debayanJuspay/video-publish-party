@@ -522,10 +522,47 @@ app.post('/accounts', authenticateToken, async (req, res) => {
   try {
     const { name, youtubeChannelId } = req.body;
     
+    console.log('🎯 Account creation request (local server):', {
+      userId: req.user.userId,
+      userEmail: req.user.email,
+      role: req.user.role,
+      accountName: name
+    });
+    
+    // RESTRICTION 1: One user can only create ONE YouTube account
+    const existingAccount = await db.collection('accounts').findOne({
+      ownerId: req.user.userId
+    });
+    
+    if (existingAccount) {
+      console.log('❌ User already has an existing account:', existingAccount.name);
+      return res.status(400).json({ 
+        error: 'You can only create one YouTube account. You already have an account named: ' + existingAccount.name 
+      });
+    }
+    
+    // RESTRICTION 2: Validate account name format
+    if (!name || name.trim().length < 2) {
+      return res.status(400).json({ 
+        error: 'Account name must be at least 2 characters long' 
+      });
+    }
+    
+    // Check for inappropriate characters or patterns
+    const invalidPatterns = /[<>\"'&\\]/;
+    if (invalidPatterns.test(name)) {
+      return res.status(400).json({ 
+        error: 'Account name contains invalid characters. Please use only letters, numbers, spaces, and basic punctuation.' 
+      });
+    }
+    
+    console.log('✅ Account validation passed, creating account...');
+    
     const account = {
-      name,
+      name: name.trim(),
       youtubeChannelId,
       ownerId: req.user.userId,
+      ownerEmail: req.user.email, // Store owner email for verification
       createdAt: new Date(),
       updatedAt: new Date()
     };
@@ -539,6 +576,8 @@ app.post('/accounts', authenticateToken, async (req, res) => {
       role: 'owner',
       createdAt: new Date()
     });
+
+    console.log('✅ Account created with owner role assigned');
 
     res.json({ 
       id: result.insertedId,

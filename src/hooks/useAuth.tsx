@@ -68,20 +68,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signInWithGoogle = async (code: string) => {
     try {
-      console.log('🔄 Starting Google OAuth sign-in process...');
       setLoading(true);
-      
-      console.log('📡 Making API call to /auth/google...');
-      const startTime = Date.now();
-      
-      const response = await api.post('/auth/google', { code }, {
-        timeout: 30000 // 30 second timeout
-      });
-      const tokenTime = Date.now();
-      console.log(`✅ OAuth API call completed in ${tokenTime - startTime}ms`);
+      const response = await api.post('/auth/google', { code });
       
       const { token: authToken } = response.data;
-      console.log('🎫 Received token, storing and setting headers...');
       
       // Store token
       localStorage.setItem('auth_token', authToken);
@@ -90,16 +80,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // Set api authorization header
       api.defaults.headers.common['Authorization'] = `Bearer ${authToken}`;
       
-      console.log('👤 Fetching user profile...');
       // Fetch the latest user profile to ensure we have the correct role
       await fetchUserProfile(authToken);
       
-      const totalTime = Date.now();
-      console.log(`🎉 Complete OAuth flow finished in ${totalTime - startTime}ms`);
-      
       return { error: null };
     } catch (error: any) {
-      console.error('❌ Google sign in error:', error);
+      console.error('Google sign in error:', error);
       return { 
         error: error.response?.data?.error || 'Authentication failed' 
       };

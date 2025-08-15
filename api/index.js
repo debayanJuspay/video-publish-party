@@ -480,11 +480,49 @@ app.post('/api/accounts', authenticateToken, async (req, res) => {
   try {
     const { name, youtubeChannelId } = req.body;
     
+    console.log('🎯 Account creation request:', {
+      userId: req.user.userId,
+      userEmail: req.user.email,
+      role: req.user.role,
+      accountName: name
+    });
+    
     const db = await connectToMongoDB();
+    
+    // RESTRICTION 1: One user can only create ONE YouTube account
+    const existingAccount = await db.collection('accounts').findOne({
+      ownerId: req.user.userId
+    });
+    
+    if (existingAccount) {
+      console.log('❌ User already has an existing account:', existingAccount.name);
+      return res.status(400).json({ 
+        error: 'You can only create one YouTube account. You already have an account named: ' + existingAccount.name 
+      });
+    }
+    
+    // RESTRICTION 2: Validate account name format (should be reasonable)
+    if (!name || name.trim().length < 2) {
+      return res.status(400).json({ 
+        error: 'Account name must be at least 2 characters long' 
+      });
+    }
+    
+    // Check for inappropriate characters or patterns
+    const invalidPatterns = /[<>\"'&\\]/;
+    if (invalidPatterns.test(name)) {
+      return res.status(400).json({ 
+        error: 'Account name contains invalid characters. Please use only letters, numbers, spaces, and basic punctuation.' 
+      });
+    }
+    
+    console.log('✅ Account validation passed, creating account...');
+    
     const account = {
-      name,
+      name: name.trim(),
       youtubeChannelId,
       ownerId: req.user.userId,
+      ownerEmail: req.user.email, // Store owner email for verification
       createdAt: new Date(),
       updatedAt: new Date()
     };
@@ -1229,8 +1267,131 @@ app.get('/api/auth/youtube/callback', async (req, res) => {
     
     console.log('Channel found:', { channelId, channelTitle });
     
-    // Store YouTube credentials and channel info in database
+    // Get the account we're trying to authorize
     const db = await connectToMongoDB();
+    const account = await db.collection('accounts').findOne({ _id: new ObjectId(accountId) });
+    
+    if (!account) {
+      console.log('Account not found:', accountId);
+      return res.status(404).send('Account not found');
+    }
+    
+    // CRITICAL: Get the YouTube account's email to validate it matches the account owner
+    const oauth2 = google.oauth2({ version: 'v2', auth: youtubeOauth2Client });
+    const userInfo = await oauth2.userinfo.get();
+    const youtubeEmail = userInfo.data.email;
+    
+    console.log('🔍 Email validation:', {
+      youtubeEmail: youtubeEmail,
+      accountOwnerEmail: account.ownerEmail,
+      accountName: account.name
+    });
+    
+    // RESTRICTION 3: YouTube account email must match the account owner's email
+    const expectedEmail = account.ownerEmail || account.name; // Use ownerEmail if available, fallback to name
+    if (youtubeEmail.toLowerCase() !== expectedEmail.toLowerCase()) {
+      console.log('❌ Email mismatch! YouTube email:', youtubeEmail, 'Expected:', expectedEmail);
+      return res.status(400).send(`
+        <html>
+          <body>
+            <script>
+              window.opener.postMessage({
+                type: 'YOUTUBE_AUTH_ERROR',
+                error: 'Email mismatch: YouTube account email (${youtubeEmail}) does not match the account owner email (${expectedEmail}). Please authorize with the correct Google account.'
+              }, '*');
+              window.close();
+            </script>
+            <p style="color: red; font-family: Arial, sans-serif; padding: 20px;">
+              ❌ Authorization failed!<br><br>
+              YouTube account email (${youtubeEmail}) does not match the account owner email (${expectedEmail}).<br><br>
+              Please authorize with the correct Google account.
+            </p>
+          </body>
+        </html>
+      `);
+    }
+    
+    // RESTRICTION 1: Check if this user already has ANY YouTube account authorized
+    const existingYouTubeAccount = await db.collection('accounts').findOne({
+      _id: { $ne: new ObjectId(accountId) }, // Exclude current account
+      ownerEmail: expectedEmail, // Check by owner email
+      $or: [
+        { youtubeChannelId: { $exists: true, $ne: null } },
+        { youtubeAccessToken: { $exists: true, $ne: null } }
+      ]
+    });
+    
+    if (existingYouTubeAccount) {
+      console.log('❌ User already has a YouTube account:', existingYouTubeAccount._id);
+      return res.status(400).send(`
+        <html>
+          <body>
+            <script>
+              window.opener.postMessage({
+                type: 'YOUTUBE_AUTH_ERROR',
+                error: 'This user already has a YouTube account authorized. Each user can only have one YouTube account.'
+              }, '*');
+              window.close();
+            </script>
+            <p style="color: red; font-family: Arial, sans-serif; padding: 20px;">
+              ❌ Authorization failed!<br><br>
+              This user already has a YouTube account authorized.<br><br>
+              Each user can only have one YouTube account.
+            </p>
+          </body>
+        </html>
+      `);
+    }
+    
+    // RESTRICTION 2: Validate YouTube channel name and username
+    if (!channelTitle || channelTitle.trim().length < 2) {
+      console.log('❌ Invalid channel title:', channelTitle);
+      return res.status(400).send(`
+        <html>
+          <body>
+            <script>
+              window.opener.postMessage({
+                type: 'YOUTUBE_AUTH_ERROR',
+                error: 'Invalid YouTube channel name. Channel name must be at least 2 characters long.'
+              }, '*');
+              window.close();
+            </script>
+            <p style="color: red; font-family: Arial, sans-serif; padding: 20px;">
+              ❌ Authorization failed!<br><br>
+              Invalid YouTube channel name. Channel name must be at least 2 characters long.
+            </p>
+          </body>
+        </html>
+      `);
+    }
+    
+    // Check for inappropriate content in channel name
+    const inappropriatePatterns = /[<>\"'&\\]|fuck|shit|damn|bitch|asshole|crap/i;
+    if (inappropriatePatterns.test(channelTitle)) {
+      console.log('❌ Channel name contains inappropriate content:', channelTitle);
+      return res.status(400).send(`
+        <html>
+          <body>
+            <script>
+              window.opener.postMessage({
+                type: 'YOUTUBE_AUTH_ERROR',
+                error: 'YouTube channel name contains inappropriate content or invalid characters. Please use a professional channel name.'
+              }, '*');
+              window.close();
+            </script>
+            <p style="color: red; font-family: Arial, sans-serif; padding: 20px;">
+              ❌ Authorization failed!<br><br>
+              YouTube channel name contains inappropriate content or invalid characters.<br><br>
+              Please use a professional channel name.
+            </p>
+          </body>
+        </html>
+      `);
+    }
+    
+    console.log('✅ Validation passed, storing YouTube credentials...');
+    
+    // Store YouTube credentials and channel info in database
     const updateResult = await db.collection('accounts').updateOne(
       { _id: new ObjectId(accountId) },
       {
